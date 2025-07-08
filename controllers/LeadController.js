@@ -1,7 +1,15 @@
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 export const create = async (req, res) => {
+    const logPath = path.join(process.cwd(), 'storage', 'backend.log');
+    const logData = `[${new Date().toISOString()}] ${JSON.stringify(req.body)}\n`;
+
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, logData);
+    
     try{
         const { token, url } = req.salesforce;
     
