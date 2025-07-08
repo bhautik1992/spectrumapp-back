@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 export const create = async (req, res) => {
+    console.log("Here");
     const logPath = path.join(process.cwd(), 'storage', 'backend.log');
     const logData = `[${new Date().toISOString()}] ${JSON.stringify(req.body)}\n`;
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -22,6 +23,18 @@ export const create = async (req, res) => {
             Status    : "Open - Not Contacted",
             LeadSource: "Web"
         };
+
+        // const payload = {
+        //     // Name      : 'A',
+        //     FirstName : 'B', 
+        //     LastName  : 'C',
+        //     Company   : 'D',
+        //     Email     : 'abc@gmail.com',
+        //     Phone     : '123853',
+        //     Description: 'DE@##33423',
+        //     Status    : "Open - Not Contacted",
+        //     LeadSource: "Web"
+        // };
         
         const response = await axios.post(`${url+process.env.SF_LEAD_GENERATE}`,payload,{
             headers: {
