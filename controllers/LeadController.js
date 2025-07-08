@@ -13,7 +13,6 @@ export const create = async (req, res) => {
     try{
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
-        // const { token, url } = req.salesforce;
     
         const payload = {
             // Name      : req.body.addresses.name,
