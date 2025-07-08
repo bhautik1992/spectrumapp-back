@@ -16,9 +16,9 @@ export const store = async (req, res) => {
         const input = req.body;
         let settings = await Settings.findOne();
 
-        if(!settings) {
-            return errorResponse(res,process.env.NO_RECORD, 404);
-        }
+        // if(!settings) {
+        //     return errorResponse(res,process.env.NO_RECORD, 404);
+        // }
 
         settings = await Settings.findOneAndUpdate({}, input, { new: true, upsert: true });
         return successResponse(res, settings, "Saved Successfully");
