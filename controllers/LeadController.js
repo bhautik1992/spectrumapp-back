@@ -14,9 +14,9 @@ export const create = async (req, res) => {
         const { token, url } = req.salesforce;
     
         const payload = {
-            LastName  : "ABC2",
-            Company   : "XYZ2",
-            Email     : "abc2.xuz@example.com",
+            LastName  : "SPL",
+            Company   : "SPC",
+            Email     : "sp@gmail.com",
             Phone     : "1232",
             Status    : "Open - Not Contacted",
             LeadSource: "Web"
