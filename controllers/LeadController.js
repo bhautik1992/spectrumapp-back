@@ -5,7 +5,6 @@ import { storeLog } from '../helpers/Common.js';
 
 export const create = async (req, res) => {
     try{
-        storeLog(req.body);
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
     
@@ -31,7 +30,8 @@ export const create = async (req, res) => {
         //     Status    : "Open - Not Contacted",
         //     LeadSource: "Web"
         // };
-        
+
+        storeLog(payload);
         const response = await axios.post(`${url+process.env.SF_LEAD_GENERATE}`,payload,{
             headers: {
                 Authorization: `Bearer ${token}`,
