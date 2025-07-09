@@ -1,11 +1,13 @@
 import Settings from '../models/Settings.js';
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import axios from 'axios';
+import { storeLog } from '../helpers/Common.js';
 
 export const salesforceAuth = async (req, res, next) => {
     try {
         const settings = await Settings.findOne();
         if (!settings || !settings.sf_instance_url || !settings.sf_client_id || !settings.sf_client_secret) {
+            storeLog('Salesforce settings not configured');
             return errorResponse(res,'Salesforce settings not configured', 500);
         }
 
@@ -15,6 +17,7 @@ export const salesforceAuth = async (req, res, next) => {
         if (!isValid) {
             const newToken = await generateToken(sf_instance_url,sf_client_id,sf_client_secret);
             if (!newToken || !newToken.access_token) {
+                storeLog('Salesforce token refresh failed');
                 return errorResponse(res,'Salesforce token refresh failed', 401);
             }
 
@@ -32,8 +35,9 @@ export const salesforceAuth = async (req, res, next) => {
         };
 
         next();
-    } catch (err) {
-        // console.error('Salesforce middleware error:', err.message);        
+    } catch (error) {
+        storeLog(error?.response?.data || error.message);
+        // console.error('Salesforce middleware error:', error.message);        
         return errorResponse(res,'Salesforce authentication error', 500);
     }
 };
@@ -48,6 +52,7 @@ const validateToken = async (instance_url, token) => {
 
         return true;
     } catch (error) {
+        storeLog(error?.response?.data || error.message);
         // console.log(error.message);
         
         // if (error.response?.status === 401) {
@@ -76,6 +81,7 @@ const generateToken = async (sf_instance_url,sf_client_id,sf_client_secret) => {
             instance_url: response.data.instance_url
         }
     } catch (error) {
+        storeLog(error?.response?.data || error.message);
         // console.error('Token Generation Error:', error?.response?.data || error.message);
         return null;
     }

@@ -1,16 +1,11 @@
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
 import Settings from '../models/Settings.js';
+import { storeLog } from '../helpers/Common.js';
 
 export const create = async (req, res) => {
-    const logPath = path.join(process.cwd(), 'storage', 'backend.log');
-    const logData = `[${new Date().toISOString()}] ${JSON.stringify(req.body)}\n`;
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.appendFileSync(logPath, logData);
-    
     try{
+        storeLog(req.body);
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
     
@@ -27,13 +22,12 @@ export const create = async (req, res) => {
         };
 
         // const payload = {
-        //     // Name      : 'A',
-        //     FirstName : 'B1', 
-        //     LastName  : 'C1',
-        //     Company   : 'D1',
-        //     Email     : 'abc1@gmail.com',
-        //     Phone     : '1238531',
-        //     Description: 'DE@##313423',
+        //     FirstName : 'B111', 
+        //     LastName  : 'C111',
+        //     Company   : 'D111',
+        //     Email     : 'abc111@gmail.com',
+        //     Phone     : '123853111',
+        //     Description:'DE@##31342311',
         //     Status    : "Open - Not Contacted",
         //     LeadSource: "Web"
         // };
@@ -45,8 +39,10 @@ export const create = async (req, res) => {
             }
         });
         
+        storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Created Successfully");
     }catch(error){
+        storeLog(error?.response?.data || error.message);
         const errorMessage = (error?.response?.data[0]?.errorCode == 'DUPLICATES_DETECTED')?'Failes to create lead, errorCode: DUPLICATES_DETECTED':'Failed to create lead'
 
         return res.status(500).json({
