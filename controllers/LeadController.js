@@ -5,6 +5,20 @@ import Customers from '../models/Customers.js';
 import { storeLog } from '../helpers/Common.js';
 
 export const create = async (req, res) => {
+    // await Customers.create([{
+    //     shopify_id                   : '123',
+    //     shopify_request_body         : 'ABC',
+    //     salesforce_lead_id           : 'ABC',
+    //     salesforce_lead_response_body: 'ABC',
+    //     lead_first_name              : 'ABC', 
+    //     lead_last_name               : 'ABC',
+    //     lead_company                 : 'ABC',
+    //     lead_email                   : 'ABC',
+    //     lead_phone                   : 'ABC',
+    //     lead_description             : 'ABC',
+    // }]);
+    // process.exit(0);
+
     try{
         storeLog(req.body);
         const settings = await Settings.findOne();
