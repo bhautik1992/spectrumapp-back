@@ -1,6 +1,7 @@
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import axios from 'axios';
 import Settings from '../models/Settings.js';
+import Customers from '../models/Customers.js';
 import { storeLog } from '../helpers/Common.js';
 
 export const create = async (req, res) => {
@@ -39,6 +40,19 @@ export const create = async (req, res) => {
             }
         });
         
+        await Customers.create([{
+            shopify_id                   : req.body.id,
+            shopify_request_body         : req.body,
+            salesforce_lead_id           : response.data.id,
+            salesforce_lead_response_body: response.data,
+            lead_first_name              : req.body.first_name, 
+            lead_last_name               : req.body.last_name,
+            lead_company                 : req.body.addresses?.[0]?.company,
+            lead_email                   : req.body.email,
+            lead_phone                   : req.body.phone || req.body.addresses?.[0]?.phone || '',
+            lead_description             : `Shopify ID: ${req.body.id}`,
+        }]);
+
         storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Created Successfully");
     }catch(error){
