@@ -4,6 +4,29 @@ import Settings from '../models/Settings.js';
 import Customers from '../models/Customers.js';
 import { storeLog } from '../helpers/Common.js';
 
+export const index = async (req, res) => {
+    try {
+        const { page = 1, perPage = 10, search = "" } = req.query;
+        const pageNumber    = parseInt(page, 10);
+        const perPageNumber = parseInt(perPage, 10);
+
+        const query = search ? { name: new RegExp(search, "i") } : {};
+
+        const customers = await Customers.aggregate([
+            { $match: query },
+            { $sort: { _id: -1 } },
+            { $skip: (pageNumber - 1) * perPageNumber },
+            { $limit: perPageNumber }
+        ]);
+
+        const total = await Customers.countDocuments(query);
+        return successResponse(res, { customers, total });
+    } catch (error) {
+        // console.log(error.message)
+        return errorResponse(res, process.env.ERROR_MSG, 500);
+    }
+};
+
 export const create = async (req, res) => {
     // await Customers.create([{
     //     shopify_id                   : '123',
