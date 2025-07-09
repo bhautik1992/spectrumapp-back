@@ -42,9 +42,9 @@ export const create = async (req, res) => {
         
         await Customers.create([{
             shopify_id                   : req.body.id,
-            shopify_request_body         : req.body,
+            shopify_request_body         : JSON.stringify(req.body),
             salesforce_lead_id           : response.data.id,
-            salesforce_lead_response_body: response.data,
+            salesforce_lead_response_body: JSON.stringify(response.data),
             lead_first_name              : req.body.first_name, 
             lead_last_name               : req.body.last_name,
             lead_company                 : req.body.addresses?.[0]?.company,
