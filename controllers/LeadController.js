@@ -149,7 +149,7 @@ export const update = async (req, res) => {
     // const shopifyId = req.body.id;
     const shopifyId = '8459525685491';
     
-    const customer = await Customers.find({'shopify_id':shopifyId});
+    const customer = await Customers.findOne({'shopify_id':shopifyId});
     if(!customer) {
         return errorResponse(res, process.env.NO_RECORD, 404);
     }
