@@ -150,6 +150,9 @@ export const update = async (req, res) => {
         const shopifyId = req.body.id;
         // const shopifyId = '8459525685491';
         
+        const settings = await Settings.findOne();
+        const { sf_access_token:token, sf_instance_url:url } = settings;
+        
         const customer = await Customers.findOne({'shopify_id':shopifyId});
         if(!customer) {
             return errorResponse(res, process.env.NO_RECORD, 404);
