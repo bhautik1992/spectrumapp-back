@@ -146,7 +146,8 @@ export const create = async (req, res) => {
 
 export const update = async (req, res) => {
     storeLog(req.body);
-    const shopifyId = req.body.id;
+    // const shopifyId = req.body.id;
+    const shopifyId = '8459525685491';
     
     const customer = await Customers.find({'shopify_id':shopifyId});
     if(!customer) {
