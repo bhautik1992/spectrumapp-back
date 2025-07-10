@@ -9,7 +9,6 @@ router.use("/login", Login);
 router.use("/user", User);
 router.use("/settings", Settings);
 router.use("/lead", Lead);
-// router.use("/create-customer", Lead);
 
 export default router;
 

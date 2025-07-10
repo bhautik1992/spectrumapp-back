@@ -92,46 +92,6 @@ export const index = async (req, res) => {
     }
 };
 
-
-export const index1 = async (req, res) => {
-    try {
-        console.log(req.query);
-
-        const { page = 1, perPage = 10, search = "" } = req.query;
-        const pageNumber    = parseInt(page, 10);
-        const perPageNumber = parseInt(perPage, 10);
-
-        let query = {};
-
-        if (search.trim() !== "") {
-            const regex = new RegExp(search, "i");
-
-            query = {$or: [
-                { shopify_id: regex },
-                { salesforce_lead_id: regex },
-                { lead_first_name: regex },
-                { lead_last_name: regex },
-                { lead_company: regex },
-                { lead_email: regex },
-                { lead_phone: regex }
-            ]};
-        }
-
-        const customers = await Customers.aggregate([
-            { $match: query },
-            { $sort: { _id: -1 } },
-            { $skip: (pageNumber - 1) * perPageNumber },
-            { $limit: perPageNumber }
-        ]);
-
-        const total = await Customers.countDocuments(query);
-        return successResponse(res, { customers, total });
-    } catch (error) {
-        console.log(error.message)
-        return errorResponse(res, process.env.ERROR_MSG, 500);
-    }
-};
-
 export const create = async (req, res) => {
     try{
         storeLog(req.body);
@@ -184,4 +144,6 @@ export const create = async (req, res) => {
     }
 }
 
-
+export const update = async (req, res) => {
+    storeLog(req.body);
+}
