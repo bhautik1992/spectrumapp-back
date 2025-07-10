@@ -152,7 +152,7 @@ export const update = async (req, res) => {
         
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
-        
+
         const customer = await Customers.findOne({'shopify_id':shopifyId});
         if(!customer) {
             return errorResponse(res, process.env.NO_RECORD, 404);
@@ -174,6 +174,19 @@ export const update = async (req, res) => {
             }
         });
         
+        await Customers.updateOne(
+            { shopify_id: shopifyId },
+            {
+                $set: {
+                    lead_first_name: req.body.first_name,
+                    lead_last_name: req.body.last_name,
+                    lead_company: req.body.addresses?.[0]?.company,
+                    lead_email: req.body.email,
+                    lead_phone: req.body.phone || req.body.addresses?.[0]?.phone || '',
+                },
+            }
+        );
+
         storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Updated Successfully");
     }catch(error){
