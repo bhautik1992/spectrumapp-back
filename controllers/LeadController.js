@@ -146,4 +146,14 @@ export const create = async (req, res) => {
 
 export const update = async (req, res) => {
     storeLog(req.body);
+    const shopifyId = req.body.id;
+    
+    const customer = await Customers.find({'shopify_id':shopifyId});
+    if(!customer) {
+        return errorResponse(res, process.env.NO_RECORD, 404);
+    }
+    
+    storeLog(customer);
+    const sfLeadId = customer.salesforce_lead_id;
+    storeLog(sfLeadId);
 }
