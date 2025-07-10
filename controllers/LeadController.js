@@ -145,16 +145,44 @@ export const create = async (req, res) => {
 }
 
 export const update = async (req, res) => {
-    storeLog(req.body);
-    // const shopifyId = req.body.id;
-    const shopifyId = '8459525685491';
+    try{
+        storeLog(req.body);
+        const shopifyId = req.body.id;
+        // const shopifyId = '8459525685491';
+        
+        const customer = await Customers.findOne({'shopify_id':shopifyId});
+        if(!customer) {
+            return errorResponse(res, process.env.NO_RECORD, 404);
+        }
+        
+        const sfLeadId = customer.salesforce_lead_id;
+        const payload  = {
+            FirstName : req.body.first_name, 
+            LastName  : req.body.last_name,
+            Company   : req.body.addresses?.[0]?.company,
+            Email     : req.body.email,
+            Phone     : req.body.phone || req.body.addresses?.[0]?.phone || '',
+        };
     
-    const customer = await Customers.findOne({'shopify_id':shopifyId});
-    if(!customer) {
-        return errorResponse(res, process.env.NO_RECORD, 404);
+        const response = await axios.patch(`${url}${process.env.SF_LEAD_GENERATE}/${sfLeadId}`,payload,{
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        storeLog(response.data);
+        return successResponse(res, response.data.id, "Lead Updated Successfully");
+    }catch(error){
+        storeLog(error?.response?.data || error.message);
+        const errorMessage = (error?.response?.data[0]?.errorCode == 'DUPLICATES_DETECTED')?'Failes to create lead, errorCode: DUPLICATES_DETECTED':'Failed to create lead'
+
+        return res.status(500).json({
+            success: false,
+            message: errorMessage,
+            error: error?.response?.data || error.message
+        });
     }
-    
-    storeLog(customer);
-    const sfLeadId = customer.salesforce_lead_id;
-    storeLog(sfLeadId);
 }
+
+
