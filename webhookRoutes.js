@@ -21,6 +21,7 @@ router.use(
 // HMAC validation middleware
 function validateShopifyWebhook(req, res, next) {
     storeLog('validateShopifyWebhook')
+    storeLog(process.env.SHOPIFY_API_SECRET)
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
   const rawBody = req.body;
 
