@@ -14,6 +14,8 @@ async function registerWebhooks() {
 
     const { shop, accessToken } = shopData;
 
+    console.log(shopData);
+    
     const topics = ['customers/create', 'customers/update'];
 
     for (const topic of topics) {
