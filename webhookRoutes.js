@@ -6,6 +6,8 @@ import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce
 
 const router = express.Router();
 
+storeLog('Inside webhookRoutes.js');
+
 // Setup raw body middleware for webhook HMAC validation
 router.use(
   '/webhooks/customers-create',
