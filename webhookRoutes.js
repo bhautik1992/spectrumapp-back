@@ -2,7 +2,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { storeLog } from './helpers/Common.js';
-import handleCustomerForSalesforce from './utils/handleCustomerForSalesforce.js'; // adjust path if needed
+import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js'; // adjust path if needed
 
 const router = express.Router();
 
