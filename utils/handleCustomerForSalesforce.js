@@ -4,8 +4,9 @@ import { storeLog } from '../helpers/Common.js';
 export async function handleCustomerForSalesforce(customer) {
   const tags = customer.tags?.split(",").map(tag => tag.trim());
 
+  storeLog(customer)
   // Only process customers with specific tag
-  if (!tags.includes("New Trade Account registration")) {
+  if (!tags.includes("New Trade Account Registration")) {
     return;
   }
 
