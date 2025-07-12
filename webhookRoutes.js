@@ -65,5 +65,18 @@ router.post('/webhooks/customers-update', validateShopifyWebhook, async (req, re
   res.status(200).send('Webhook received');
 });
 
+router.patch('/webhooks/customers-update', validateShopifyWebhook, async (req, res) => {
+    storeLog('Call → webhooks/customers-update');
+  console.log('✅ Call → webhooks/customers-update');
+  const body = req.body.toString();
+  storeLog('webhooks/customers-update: ' + body);
+
+  const customer = JSON.parse(body);
+  await handleCustomerForSalesforce(customer);
+
+  console.log('✅ Webhook processed');
+  res.status(200).send('Webhook received');
+});
+
 export default router;
  
