@@ -4,6 +4,8 @@ import { handleCustomerForSalesforce  } from '../../utils/handleCustomerForSales
 
 const router = express.Router();
 
+storeLog('Inside Webhook.js')
+
 const webhookHandlers = {
   CUSTOMERS_CREATE: async (topic, shop, body) => {
     const customer = JSON.parse(body);

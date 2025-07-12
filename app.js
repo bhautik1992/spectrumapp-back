@@ -28,6 +28,8 @@ app.use(express.json());
 app.use('/',webhooks); 
 app.use(process.env.API_PREFIX, router); 
 
+storeLog('Inside app.js')
+
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
     console.error(err.stack);
