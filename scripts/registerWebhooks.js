@@ -15,11 +15,11 @@ async function registerWebhooks() {
     const { shop, accessToken } = shopData;
 
     console.log(shopData);
-    
+
     const topics = ['customers/create', 'customers/update'];
 
     for (const topic of topics) {
-      const address = `https://spactrumappback.hailysoft.com/webhooks/${topic.replace('/', '-')}`;
+      const address = `https://spectrumappback.hailysoft.com/webhooks/${topic.replace('/', '-')}`;
 
       const res = await axios.post(
         `https://${shop}/admin/api/2025-07/webhooks.json`,
