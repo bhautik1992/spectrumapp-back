@@ -1,63 +1,61 @@
 // webhookRoutes.js
 import express from 'express';
-const router = express.Router();
+import crypto from 'crypto';
 import { storeLog } from './helpers/Common.js';
-import { shopifyWebhookHandler } from '@shopify/shopify-api';
+import handleCustomerForSalesforce from './utils/handleCustomerForSalesforce.js'; // adjust path if needed
 
-const webhookMiddleware = shopifyWebhookHandler({
-    secret: process.env.SHOPIFY_API_SECRET,
-    handlers: webhookHandlers,
-  });
+const router = express.Router();
 
-router.post('/webhooks/customers-create', webhookMiddleware, async (req, res) => {
-    console.log('Call -> webhooks/customers-create')
-    storeLog('webhooks/customers-create'+req.body)
+// Setup raw body middleware for webhook HMAC validation
+router.use(
+  '/webhooks/customers-create',
+  express.raw({ type: 'application/json' })
+);
+router.use(
+  '/webhooks/customers-update',
+  express.raw({ type: 'application/json' })
+);
+
+// HMAC validation middleware
+function validateShopifyWebhook(req, res, next) {
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
-  const topic = req.get('X-Shopify-Topic');
-  const domain = req.get('X-Shopify-Shop-Domain');
-  const body = req.rawBody || JSON.stringify(req.body); // raw body required for HMAC validation
+  const rawBody = req.body;
 
-  // Step 1: Verify HMAC (optional but recommended)
-  const crypto = await import('crypto');
-  const generatedHmac = crypto.createHmac('sha256', process.env.SHOPIFY_API_SECRET)
-    .update(body, 'utf8')
+  const generatedHmac = crypto
+    .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+    .update(rawBody, 'utf8')
     .digest('base64');
 
-  if (generatedHmac !== hmacHeader) {
+  if (hmacHeader !== generatedHmac) {
     return res.status(401).send('Invalid HMAC');
   }
 
-  // Step 2: Process customer
+  next();
+}
+
+// === Handle Customers Create ===
+router.post('/webhooks/customers-create', validateShopifyWebhook, async (req, res) => {
+  console.log('✅ Call → webhooks/customers-create');
+  const body = req.body.toString();
+  storeLog('webhooks/customers-create: ' + body);
+
   const customer = JSON.parse(body);
   await handleCustomerForSalesforce(customer);
 
-  console.log('Webhook received')
+  console.log('✅ Webhook processed');
   res.status(200).send('Webhook received');
 });
 
-router.post('/webhooks/customers-update', webhookMiddleware, async (req, res) => {
-    console.log('Call -> webhooks/customers-update')
-    storeLog('webhooks/customers-update'+req.body)
-  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
-  const topic = req.get('X-Shopify-Topic');
-  const domain = req.get('X-Shopify-Shop-Domain');
-  const body = req.rawBody || JSON.stringify(req.body); // raw body required for HMAC validation
+// === Handle Customers Update ===
+router.post('/webhooks/customers-update', validateShopifyWebhook, async (req, res) => {
+  console.log('✅ Call → webhooks/customers-update');
+  const body = req.body.toString();
+  storeLog('webhooks/customers-update: ' + body);
 
-  // Step 1: Verify HMAC (optional but recommended)
-  const crypto = await import('crypto');
-  const generatedHmac = crypto.createHmac('sha256', process.env.SHOPIFY_API_SECRET)
-    .update(body, 'utf8')
-    .digest('base64');
-
-  if (generatedHmac !== hmacHeader) {
-    return res.status(401).send('Invalid HMAC');
-  }
-
-  // Step 2: Process customer
   const customer = JSON.parse(body);
   await handleCustomerForSalesforce(customer);
 
-  console.log('Webhook received')
+  console.log('✅ Webhook processed');
   res.status(200).send('Webhook received');
 });
 
