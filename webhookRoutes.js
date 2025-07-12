@@ -18,6 +18,7 @@ router.use(
 
 // HMAC validation middleware
 function validateShopifyWebhook(req, res, next) {
+    storeLog('validateShopifyWebhook')
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
   const rawBody = req.body;
 
@@ -35,6 +36,7 @@ function validateShopifyWebhook(req, res, next) {
 
 // === Handle Customers Create ===
 router.post('/webhooks/customers-create', validateShopifyWebhook, async (req, res) => {
+    storeLog('Call → webhooks/customers-create')
   console.log('✅ Call → webhooks/customers-create');
   const body = req.body.toString();
   storeLog('webhooks/customers-create: ' + body);
@@ -48,6 +50,7 @@ router.post('/webhooks/customers-create', validateShopifyWebhook, async (req, re
 
 // === Handle Customers Update ===
 router.post('/webhooks/customers-update', validateShopifyWebhook, async (req, res) => {
+    storeLog('Call → webhooks/customers-update');
   console.log('✅ Call → webhooks/customers-update');
   const body = req.body.toString();
   storeLog('webhooks/customers-update: ' + body);
