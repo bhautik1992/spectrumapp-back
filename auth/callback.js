@@ -7,6 +7,7 @@ import Shop from '../models/Shop.js';
 const router = express.Router();
 
 router.get('/auth/callback', async (req, res) => {
+  console.log("callback call")
   const { shop, code, hmac } = req.query;
 
   if (!shop || !code || !hmac) {
@@ -64,8 +65,8 @@ router.get('/auth/callback', async (req, res) => {
       );
     };
 
-    await registerWebhook('customers/create', `https://spectrum-one-hair.myshopify.com/webhooks/customers-create`);
-    await registerWebhook('customers/update', `https://spectrum-one-hair.myshopify.com/webhooks/customers-update`);
+    await registerWebhook('customers/create', `https://spectrumappback.hailysoft.com//webhooks/customers-create`);
+    await registerWebhook('customers/update', `https://spectrumappback.hailysoft.com//webhooks/customers-update`);
 
     console.log(`✅ Webhooks registered for ${shop}`);
     res.redirect(`https://${shop}/admin/apps`);
