@@ -1,8 +1,12 @@
 // webhookRoutes.js
 import express from 'express';
 const router = express.Router();
+import { storeLog } from './helpers/Common.js';
+
 
 router.post('/webhooks/customers-create', async (req, res) => {
+    console.log('Call -> webhooks/customers-create')
+    storeLog('webhooks/customers-create'+req.body)
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
   const topic = req.get('X-Shopify-Topic');
   const domain = req.get('X-Shopify-Shop-Domain');
@@ -22,6 +26,7 @@ router.post('/webhooks/customers-create', async (req, res) => {
   const customer = JSON.parse(body);
   await handleCustomerForSalesforce(customer);
 
+  console.log('Webhook received')
   res.status(200).send('Webhook received');
 });
 
