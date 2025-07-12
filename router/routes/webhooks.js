@@ -1,6 +1,6 @@
 import express from 'express';
 import { shopifyWebhookHandler } from '@shopify/shopify-api';
-import handleCustomerForSalesforce from '../../utils/handleCustomerForSalesforce.js'; // update path as needed
+import { handleCustomerForSalesforce  } from '../../utils/handleCustomerForSalesforce.js'; // update path as needed
 
 const router = express.Router();
 
