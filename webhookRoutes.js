@@ -2,9 +2,14 @@
 import express from 'express';
 const router = express.Router();
 import { storeLog } from './helpers/Common.js';
+import { shopifyWebhookHandler } from '@shopify/shopify-api';
 
+const webhookMiddleware = shopifyWebhookHandler({
+    secret: process.env.SHOPIFY_API_SECRET,
+    handlers: webhookHandlers,
+  });
 
-router.post('/webhooks/customers-create', async (req, res) => {
+router.post('/webhooks/customers-create', webhookMiddleware, async (req, res) => {
     console.log('Call -> webhooks/customers-create')
     storeLog('webhooks/customers-create'+req.body)
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
@@ -30,7 +35,7 @@ router.post('/webhooks/customers-create', async (req, res) => {
   res.status(200).send('Webhook received');
 });
 
-router.post('/webhooks/customers-update', async (req, res) => {
+router.post('/webhooks/customers-update', webhookMiddleware, async (req, res) => {
     console.log('Call -> webhooks/customers-update')
     storeLog('webhooks/customers-update'+req.body)
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
