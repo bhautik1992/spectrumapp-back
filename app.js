@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import router from './router/index.js';
+import webhooks from './router/routes/Webhooks.js';
 import connectDB from './config/database.js';
 import cors from 'cors';
 import path from 'path';
@@ -25,6 +26,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(express.json());
 app.use(process.env.API_PREFIX, router); 
+app.use(webhooks); 
 
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
