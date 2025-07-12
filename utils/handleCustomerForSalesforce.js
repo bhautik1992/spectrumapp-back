@@ -2,13 +2,33 @@ import axios from "axios";
 import { storeLog } from '../helpers/Common.js';
 
 export async function handleCustomerForSalesforce(customer) {
-  const tags = customer.tags?.split(",").map(tag => tag.trim());
+    const customerId = customer.id;
 
-  storeLog(customer)
-  // Only process customers with specific tag
-  if (!tags.includes("New Trade Account Registration")) {
-    return;
-  }
+    // Get shop domain (from webhook or config)
+    const shopDomain = process.env.SHOPIFY_APP_URL;
+    const accessToken = process.env.ADMIN_API_ACCESS_TOKEN;
+
+    // Fetch full customer object
+    const res = await axios.get(
+      `https://${shopDomain}/admin/api/2025-07/customers/${customerId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    const customer = res.data.customer;
+    const tags = customer.tags?.split(',').map(tag => tag.trim()) || [];
+
+    storeLog(`✅ Fetched customer ${customer.id} tags: ${tags.join(', ')}`);
+
+
+    // Only process customers with specific tag
+    if (!tags.includes("New Trade Account Registration")) {
+        return;
+    }
 
   const leadPayload = {
     FirstName: customer.first_name || "",

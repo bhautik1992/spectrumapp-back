@@ -24,10 +24,17 @@ function validateShopifyWebhook(req, res, next) {
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
   const rawBody = req.body;
 
+storeLog(process.env.SHOPIFY_API_SECRET)
+
   const generatedHmac = crypto
     .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
     .update(rawBody, 'utf8')
     .digest('base64');
+
+
+storeLog(hmacHeader || 'hmacHeader undefined')
+storeLog(generatedHmac || 'generatedHmac undefined')
+
 
   if (hmacHeader !== generatedHmac) {
     storeLog('Invalid HMAC')
@@ -38,7 +45,7 @@ function validateShopifyWebhook(req, res, next) {
 }
 
 // === Handle Customers Create ===
-router.post('/webhooks/customers-create', validateShopifyWebhook, async (req, res) => {
+router.post('/webhooks/customers-create',  async (req, res) => {
     storeLog('Call → webhooks/customers-create')
   console.log('✅ Call → webhooks/customers-create');
   const body = req.body.toString();
@@ -52,7 +59,7 @@ router.post('/webhooks/customers-create', validateShopifyWebhook, async (req, re
 });
 
 // === Handle Customers Update ===
-router.post('/webhooks/customers-update', validateShopifyWebhook, async (req, res) => {
+router.post('/webhooks/customers-update', async (req, res) => {
     storeLog('Call → webhooks/customers-update');
   console.log('✅ Call → webhooks/customers-update');
   const body = req.body.toString();
@@ -65,7 +72,7 @@ router.post('/webhooks/customers-update', validateShopifyWebhook, async (req, re
   res.status(200).send('Webhook received');
 });
 
-router.patch('/webhooks/customers-update', validateShopifyWebhook, async (req, res) => {
+router.patch('/webhooks/customers-update', async (req, res) => {
     storeLog('Call → webhooks/customers-update');
   console.log('✅ Call → webhooks/customers-update');
   const body = req.body.toString();
