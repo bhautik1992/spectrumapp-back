@@ -6,7 +6,6 @@ import connectDB from './config/database.js';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {storeLog} from './helpers/Common.js';
 
 dotenv.config();
 connectDB();
@@ -29,8 +28,6 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/',webhooks); 
 app.use(process.env.API_PREFIX, router); 
 app.use(express.json());
-
-storeLog('Inside app.js')
 
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {

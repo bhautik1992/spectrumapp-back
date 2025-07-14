@@ -1,89 +1,48 @@
-// webhookRoutes.js
 import express from 'express';
 import crypto from 'crypto';
 import { storeLog } from './helpers/Common.js';
-import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js'; // adjust path if needed
+import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js';
 
 const router = express.Router();
 
-storeLog('Inside webhookRoutes.js');
+router.use('/webhooks/customers-create',express.raw({ type: 'application/json' }));
+router.use('/webhooks/customers-update',express.raw({ type: 'application/json' }));
 
-// Setup raw body middleware for webhook HMAC validation
-router.use(
-  '/webhooks/customers-create',
-  express.raw({ type: 'application/json' })
-);
-router.use(
-  '/webhooks/customers-update',
-  express.raw({ type: 'application/json' })
-);
-
-// HMAC validation middleware
 function validateShopifyWebhook(req, res, next) {
-    storeLog('validateShopifyWebhook')
-  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
-  const rawBody = req.body;
+    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+    const rawBody = req.body;
 
-storeLog(process.env.SHOPIFY_API_SECRET)
-
-  const generatedHmac = crypto
+    const generatedHmac = crypto
     .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
     .update(rawBody, 'utf8')
     .digest('base64');
 
+    if (hmacHeader !== generatedHmac) {
+        return res.status(401).send('Invalid HMAC');
+    }
 
-storeLog(hmacHeader || 'hmacHeader undefined')
-storeLog(generatedHmac || 'generatedHmac undefined')
-
-
-  if (hmacHeader !== generatedHmac) {
-    storeLog('Invalid HMAC')
-    return res.status(401).send('Invalid HMAC');
-  }
-
-  next();
+    next();
 }
 
-// === Handle Customers Create ===
 router.post('/webhooks/customers-create',  async (req, res) => {
-    storeLog('Call → webhooks/customers-create')
-  console.log('✅ Call → webhooks/customers-create');
-  const body = req.body.toString();
-  storeLog('webhooks/customers-create: ' + body);
+    const body = req.body.toString();
+    
+    const customer = JSON.parse(body);
+    await handleCustomerForSalesforce(customer);
 
-  const customer = JSON.parse(body);
-  await handleCustomerForSalesforce(customer);
-
-  console.log('✅ Webhook processed');
-  res.status(200).send('Webhook received');
+    res.status(200).send('Webhook received');
 });
 
-// === Handle Customers Update ===
 router.post('/webhooks/customers-update', async (req, res) => {
-    storeLog('Call → webhooks/customers-update');
-  console.log('✅ Call → webhooks/customers-update');
-  const body = req.body.toString();
-  storeLog('webhooks/customers-update: ' + body);
+    const body = req.body.toString();
+    storeLog('webhooks/customers-update: ' + body);
 
-  const customer = JSON.parse(body);
-  await handleCustomerForSalesforce(customer);
+    const customer = JSON.parse(body);
+    await handleCustomerForSalesforce(customer);
 
-  console.log('✅ Webhook processed');
-  res.status(200).send('Webhook received');
-});
-
-router.patch('/webhooks/customers-update', async (req, res) => {
-    storeLog('Call → webhooks/customers-update');
-  console.log('✅ Call → webhooks/customers-update');
-  const body = req.body.toString();
-  storeLog('webhooks/customers-update: ' + body);
-
-  const customer = JSON.parse(body);
-  await handleCustomerForSalesforce(customer);
-
-  console.log('✅ Webhook processed');
-  res.status(200).send('Webhook received');
+    res.status(200).send('Webhook received');
 });
 
 export default router;
- 
+
+
