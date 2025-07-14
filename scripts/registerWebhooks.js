@@ -9,7 +9,7 @@ async function registerWebhooks() {
     try {
         await mongoose.connect(process.env.MONGODB_URI);
 
-        const shopData = await Shop.findOne({ shop: 'spectrum-one-hair.myshopify.com' }); // replace with your actual domain
+        const shopData = await Shop.findOne({ shop: process.env.SHOPIFY_APP_NAME });
         if (!shopData) throw new Error('Shop not found in DB');
 
         const { shop, accessToken } = shopData;
