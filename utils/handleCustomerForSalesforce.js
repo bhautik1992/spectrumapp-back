@@ -1,16 +1,23 @@
+import mongoose from 'mongoose';
 import axios from "axios";
-import { storeLog } from '../helpers/Common.js';
 import dotenv from 'dotenv';
+import Settings from '../models/Settings.js';
+import { storeLog } from '../helpers/Common.js';
 
 dotenv.config();
 
 export async function handleCustomerForSalesforce(customer) {
     try{
+        await mongoose.connect(process.env.MONGODB_URI);
+
+        const settings = await Settings.findOne();
+        const { sp_app_url, admin_api_access_token } = settings;        
+        
         const customerId  = customer.id;
 
-	    const shopifyCus = await axios.get(`${process.env.SHOPIFY_APP_URL}/admin/api/2025-07/customers/${customerId}.json`,{
+	    const shopifyCus = await axios.get(`${sp_app_url}/admin/api/2025-07/customers/${customerId}.json`,{
             headers: {
-                'X-Shopify-Access-Token': process.env.ADMIN_API_ACCESS_TOKEN,
+                'X-Shopify-Access-Token': admin_api_access_token,
                 'Content-Type': 'application/json',
             }
         });
@@ -43,6 +50,7 @@ export async function handleCustomerForSalesforce(customer) {
         });
 
         storeLog("Salesforce Lead Created Successfully:"+response.data.id);
+        await mongoose.disconnect();
 	} catch (error) {
         if (error.response) {
             storeLog("Shopify API Error:");
