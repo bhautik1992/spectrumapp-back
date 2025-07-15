@@ -1,6 +1,6 @@
 import express from 'express';
 import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js';
-import { salesforceAuth } from '../middleware/salesforceAuth.js';
+import { salesforceAuth } from './middleware/salesforceAuth.js';
 
 const router = express.Router();
 
