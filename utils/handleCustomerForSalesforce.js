@@ -1,23 +1,22 @@
 import axios from "axios";
 import { storeLog } from '../helpers/Common.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 export async function handleCustomerForSalesforce(customer) {
-    const customerId  = customer.id;
-    const shopDomain  = process.env.SHOPIFY_APP_URL;
-    const accessToken = process.env.ADMIN_API_ACCESS_TOKEN;
-
     try{
-	    const res = await axios.get(`${shopDomain}/admin/api/2025-07/customers/${customerId}.json`,{
+        const customerId  = customer.id;
+
+	    const shopifyCus = await axios.get(`${process.env.SHOPIFY_APP_URL}/admin/api/2025-07/customers/${customerId}.json`,{
             headers: {
-                'X-Shopify-Access-Token': accessToken,
+                'X-Shopify-Access-Token': process.env.ADMIN_API_ACCESS_TOKEN,
                 'Content-Type': 'application/json',
             }
         });
         
-        const spcustomer = res.data.customer;
-        const tags = spcustomer.tags?.split(',').map(tag => tag.trim()) || [];
-        
-        // Only process customers with specific tag
+        const cusInfo = shopifyCus.data.customer;
+        const tags = cusInfo.tags?.split(',').map(tag => tag.trim()) || [];
         if (!tags.includes("New Trade Account Registration")) {
             return;
         }
@@ -35,15 +34,15 @@ export async function handleCustomerForSalesforce(customer) {
             Country   : customer.default_address?.country || "",
             LeadSource: "Shopify Registration"
         };
-        		
-        const response = await axios.post(`https://orgfarm-fa4a036c76-dev-ed.develop.my.salesforce.com/services/data/v64.0/sobjects/Lead`,leadPayload,{
+        
+        const response = await axios.post(process.env.SF_LEAD_GENERATE_URL,leadPayload,{
             headers: {
-                Authorization: `Bearer ${process.env.SALESFORCE_ACCESS_TOKEN}`,
+                Authorization: `Bearer ${process.env.SF_ACCESS_TOKEN}`,
                 "Content-Type": "application/json"
             }
         });
 
-        storeLog("Salesforce Lead Created:"+response.data.id);
+        storeLog("Salesforce Lead Created Successfully:"+response.data.id);
 	} catch (error) {
         if (error.response) {
             storeLog("Shopify API Error:");
@@ -57,7 +56,7 @@ export async function handleCustomerForSalesforce(customer) {
             storeLog("Unexpected Error: " + error.message);
         }
 
-    storeLog("Full Error: " + JSON.stringify(error, Object.getOwnPropertyNames(error)));
+        storeLog("Full Error: " + JSON.stringify(error, Object.getOwnPropertyNames(error)));
     }
 }
 
