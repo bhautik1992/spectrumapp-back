@@ -1,16 +1,25 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import Settings from '../models/Settings.js';
 
 dotenv.config();
 
 async function registerWebhooks() {
     try {
+
+        const settings = await Settings.findOne();
+        const { sp_app_name } = settings;
+
+        console.log(sp_app_name);
+        process.exit(0);
+        
+        
         const topics = ['customers/create', 'customers/update'];
 
         for(const topic of topics){
             const address = `${process.env.APP_URL}/webhooks/${topic.replace('/', '-')}`;
 
-            await axios.post(`https://${process.env.SHOPIFY_APP_NAME}/admin/api/2025-07/webhooks.json`,{
+            await axios.post(`https://${sp_app_name}/admin/api/2025-07/webhooks.json`,{
                 webhook: {
                     topic,
                     address,
