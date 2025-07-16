@@ -34,7 +34,7 @@ export const salesforceAuth = async (req, res, next) => {
             url  : sf_instance_url
         };
 
-        storeLog('Successfully Passed from middleware');
+        // storeLog('Successfully Passed from middleware');
         next();
     } catch (error) {
         storeLog(error?.response?.data || error.message);

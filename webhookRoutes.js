@@ -1,5 +1,5 @@
 import express from 'express';
-import { handleCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js';
+import { handleCustomerForSalesforce, handleUpdateCustomerForSalesforce } from './utils/handleCustomerForSalesforce.js';
 import { storeLog } from './helpers/Common.js';
 import { salesforceAuth } from './middleware/salesforceAuth.js';
 
@@ -20,7 +20,7 @@ router.post('/webhooks/customers-update',salesforceAuth,async (req, res) => {
     
     const customer = JSON.parse(body);
     // storeLog("Webhook webhooks/customers-update Call")
-    await handleCustomerForSalesforce(customer);
+    await handleUpdateCustomerForSalesforce(customer);
 
     res.status(200).send('Customer Update Webhook Received');
 });
