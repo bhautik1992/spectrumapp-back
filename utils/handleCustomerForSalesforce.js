@@ -41,11 +41,9 @@ export async function handleCustomerForSalesforce(customer) {
             Country   : customer.default_address?.country || "",
             LeadSource: "Shopify Registration"
         };
-        
-        storeLog('URL '+process.env.SF_LEAD_GENERATE_URL);
-        storeLog('URL '+leadPayload);
-        storeLog('URL '+process.env.SF_ACCESS_TOKEN);
 
+        storeLog('Reached');
+        
         const response = await axios.post(process.env.SF_LEAD_GENERATE_URL,leadPayload,{
             headers: {
                 Authorization: `Bearer ${process.env.SF_ACCESS_TOKEN}`,
