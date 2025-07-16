@@ -4,6 +4,8 @@ import { storeLog } from './helpers/Common.js';
 
 const router = express.Router();
 
+storeLog("Inside webhookRoutes");
+
 router.use('/webhooks/customers-create',express.raw({ type: 'application/json' }));
 router.use('/webhooks/customers-update',express.raw({ type: 'application/json' }));
 
