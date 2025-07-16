@@ -1,24 +1,22 @@
 import { verifyToken } from '../helpers/JWTToken.js';
 import { errorResponse } from '../helpers/ResponseHandler.js';
-import { storeLog } from '../helpers/Common.js';
 
 export const protectRoute = (req, res, next) => {
-    storeLog("Inside protectRoute");
     next();
     
-    // const token = req.headers['authorization']?.split(' ')[1];
+    const token = req.headers['authorization']?.split(' ')[1];
 
-    // if(!token){
-    //     return errorResponse(res, 'No token provided', null, 403);
-    // }
+    if(!token){
+        return errorResponse(res, 'No token provided', null, 403);
+    }
 
-    // const decoded = verifyToken(token);
-    // if(!decoded){
-    //     return errorResponse(res, 'Invalid or expired token', null, 401);
-    // }
+    const decoded = verifyToken(token);
+    if(!decoded){
+        return errorResponse(res, 'Invalid or expired token', null, 401);
+    }
 
-    // req.user = decoded;
-    // next();
+    req.user = decoded;
+    next();
 };
 
 

@@ -1,7 +1,7 @@
-import mongoose from 'mongoose';
 import axios from 'axios';
+import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import Settings from '../models/Settings.js';
+import Shop from '../models/Shop.js';
 
 dotenv.config();
 
@@ -9,24 +9,27 @@ async function registerWebhooks() {
     try {
         await mongoose.connect(process.env.MONGODB_URI);
 
-        const settings = await Settings.findOne();
-        const { sp_app_name, admin_api_access_token } = settings;        
-        
+        const shopData = await Shop.findOne({ shop: process.env.SHOPIFY_APP_NAME });
+        if (!shopData) throw new Error('Shop not found in DB');
+
+        const { shop, accessToken } = shopData;
         const topics = ['customers/create', 'customers/update'];
 
-        for(const topic of topics){
-            const address = `${process.env.APP_URL}/webhooks/${topic.replace('/', '-')}`;
+        for (const topic of topics) {
+            const address = `https://spectrumappback.hailysoft.com/webhooks/${topic.replace('/', '-')}`;
 
-            await axios.post(`https://${sp_app_name}/admin/api/2025-07/webhooks.json`,{
+            const res = await axios.post(`https://${shop}/admin/api/2025-07/webhooks.json`,{
                 webhook: {
                     topic,
                     address,
                     format: 'json'
                 }
-            },{headers: {
-                'X-Shopify-Access-Token': admin_api_access_token,
-                'Content-Type': 'application/json'
-            }});
+            },{
+                headers: {
+                    'X-Shopify-Access-Token': accessToken,
+                    'Content-Type': 'application/json'
+                }
+            });
 
             console.log(`✅ Registered webhook: ${topic} → ${address}`);
         }
