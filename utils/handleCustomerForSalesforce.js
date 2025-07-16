@@ -128,7 +128,7 @@ export async function handleUpdateCustomerForSalesforce(customer) {
             LeadSource: "Shopify Registration"
         };
 
-        const response = await axios.post(`${process.env.SF_LEAD_GENERATE_URL}/${sfLeadId}`,leadPayload,{
+        const response = await axios.patch(`${process.env.SF_LEAD_GENERATE_URL}/${sfLeadId}`,leadPayload,{
             headers: {
                 Authorization: `Bearer ${sf_access_token}`,
                 "Content-Type": "application/json"
