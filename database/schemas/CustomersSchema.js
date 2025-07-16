@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import mongooseDelete from "mongoose-delete";
 
 const schema = new mongoose.Schema({
-    shopify_id                   : {type: String,required: true},
+    shopify_cus_id               : {type: String,required: true},
     shopify_request_body         : {type: String,required: true},
     salesforce_lead_id           : {type: String,required: true},
     salesforce_lead_response_body: {type: String,required: true},

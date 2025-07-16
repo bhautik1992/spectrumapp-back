@@ -9,7 +9,7 @@ dotenv.config();
 
 export async function handleCustomerForSalesforce(customer) {
     storeLog(customer);
-    
+
     try{
         await mongoose.connect(process.env.MONGODB_URI);
 
@@ -45,19 +45,6 @@ export async function handleCustomerForSalesforce(customer) {
             LeadSource: "Shopify Registration"
         };
 
-        // await Customers.create([{
-        //     shopify_id                   : req.body.id,
-        //     shopify_request_body         : JSON.stringify(req.body),
-        //     salesforce_lead_id           : response.data.id,
-        //     salesforce_lead_response_body: JSON.stringify(response.data),
-        //     lead_first_name              : req.body.first_name, 
-        //     lead_last_name               : req.body.last_name,
-        //     lead_company                 : req.body.addresses?.[0]?.company,
-        //     lead_email                   : req.body.email,
-        //     lead_phone                   : req.body.phone || req.body.addresses?.[0]?.phone || '',
-        //     lead_description             : `Shopify ID: ${req.body.id}`,
-        // }]);
-
         storeLog('Reached');
 
         const response = await axios.post(process.env.SF_LEAD_GENERATE_URL,leadPayload,{
@@ -66,6 +53,19 @@ export async function handleCustomerForSalesforce(customer) {
                 "Content-Type": "application/json"
             }
         });
+
+        await Customers.create([{
+            shopify_cus_id               : customer.id,
+            shopify_request_body         : JSON.stringify(customer),
+            salesforce_lead_id           : response.data.id,
+            salesforce_lead_response_body: JSON.stringify(response.data),
+            lead_first_name              : customer.first_name || "",
+            lead_last_name               : customer.last_name || "Shopify User",
+            lead_email                   : customer.email,
+            lead_company                 : customer.default_address?.company || "Individual",
+            lead_phone                   : customer.phone || "",
+            lead_description             : `Shopify ID: ${customer.id}`,
+        }]);
 
         storeLog("Salesforce Lead Created Successfully:"+response.data.id);
         await mongoose.disconnect();
