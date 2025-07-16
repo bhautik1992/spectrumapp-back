@@ -2,13 +2,16 @@ import mongoose from 'mongoose';
 import mongooseDelete from "mongoose-delete";
 
 const schema = new mongoose.Schema({
-    sf_instance_url  : {type: String,maxlength: 100},
-    sf_client_id     : {type: String},
-    sf_client_secret : {type: String},
-    sf_username      : {type: String},
-    sf_security_token: {type: String},
-    sf_access_token  : {type: String},
-    deletedAt        : {type: Date}
+    sf_instance_url       : {type: String,maxlength: 100},
+    sf_client_id          : {type: String},
+    sf_client_secret      : {type: String},
+    sf_username           : {type: String},
+    sf_security_token     : {type: String},
+    sf_access_token       : {type: String},
+    sp_app_name           : {type: String},
+    sp_app_url            : {type: String,maxlength: 100},
+    admin_api_access_token: {type: String},
+    deletedAt             : {type: Date}
 },{
     timestamps: true
 });
