@@ -39,7 +39,7 @@ export const index = async (req, res) => {
 
             matchConditions.push({
                 $or: [
-                    { shopify_id: regex },
+                    { shopify_cus_id: regex },
                     { salesforce_lead_id: regex },
                     { lead_first_name: regex },
                     { lead_last_name: regex },
@@ -118,7 +118,7 @@ export const create = async (req, res) => {
         });
         
         await Customers.create([{
-            shopify_id                   : req.body.id,
+            shopify_cus_id                   : req.body.id,
             shopify_request_body         : JSON.stringify(req.body),
             salesforce_lead_id           : response.data.id,
             salesforce_lead_response_body: JSON.stringify(response.data),
@@ -153,7 +153,7 @@ export const update = async (req, res) => {
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
 
-        const customer = await Customers.findOne({'shopify_id':shopifyId});
+        const customer = await Customers.findOne({'shopify_cus_id':shopifyId});
         if(!customer) {
             return errorResponse(res, process.env.NO_RECORD, 404);
         }
@@ -175,7 +175,7 @@ export const update = async (req, res) => {
         });
         
         await Customers.updateOne(
-            { shopify_id: shopifyId },
+            { shopify_cus_id: shopifyId },
             {
                 $set: {
                     lead_first_name: req.body.first_name,
