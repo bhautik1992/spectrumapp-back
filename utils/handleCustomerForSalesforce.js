@@ -71,6 +71,7 @@ async function syncCustomerToSalesforce(customer, action) {
                 lead_company: leadPayload.Company,
                 lead_phone: leadPayload.Phone,
                 lead_description: `Shopify ID: ${customer.id}`,
+                lead_source: 6 //"Shopify Registration"
             });
 
             storeLog("✅ Salesforce Lead Created: " + response.data.id);
