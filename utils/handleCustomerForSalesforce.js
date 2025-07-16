@@ -3,10 +3,13 @@ import axios from "axios";
 import dotenv from 'dotenv';
 import Settings from '../models/Settings.js';
 import { storeLog } from '../helpers/Common.js';
+import Customers from '../models/Customers.js';
 
 dotenv.config();
 
 export async function handleCustomerForSalesforce(customer) {
+    storeLog(customer);
+    
     try{
         await mongoose.connect(process.env.MONGODB_URI);
 
@@ -41,6 +44,19 @@ export async function handleCustomerForSalesforce(customer) {
             Country   : customer.default_address?.country || "",
             LeadSource: "Shopify Registration"
         };
+
+        // await Customers.create([{
+        //     shopify_id                   : req.body.id,
+        //     shopify_request_body         : JSON.stringify(req.body),
+        //     salesforce_lead_id           : response.data.id,
+        //     salesforce_lead_response_body: JSON.stringify(response.data),
+        //     lead_first_name              : req.body.first_name, 
+        //     lead_last_name               : req.body.last_name,
+        //     lead_company                 : req.body.addresses?.[0]?.company,
+        //     lead_email                   : req.body.email,
+        //     lead_phone                   : req.body.phone || req.body.addresses?.[0]?.phone || '',
+        //     lead_description             : `Shopify ID: ${req.body.id}`,
+        // }]);
 
         storeLog('Reached');
 
