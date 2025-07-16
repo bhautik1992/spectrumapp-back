@@ -26,8 +26,8 @@ app.use('/webhooks/customers-create', express.raw({ type: 'application/json' }))
 app.use('/webhooks/customers-update', express.raw({ type: 'application/json' }));
 
 app.use('/',webhooks); 
-app.use(process.env.API_PREFIX, router); 
 app.use(express.json());
+app.use(process.env.API_PREFIX, router); 
 
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
