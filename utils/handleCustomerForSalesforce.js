@@ -1,9 +1,9 @@
-import mongoose from 'mongoose';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import Settings from '../models/Settings.js';
 import { storeLog } from '../helpers/Common.js';
 import Customers from '../models/Customers.js';
+import connectDB from '../config/database.js';
 
 dotenv.config();
 
@@ -17,7 +17,7 @@ export async function handleUpdateCustomerForSalesforce(customer) {
 
 async function syncCustomerToSalesforce(customer, action) {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
+        await connectDB();
 
         const settings = await Settings.findOne();
         const { sp_app_url, admin_api_access_token, sf_access_token } = settings;
@@ -106,8 +106,6 @@ async function syncCustomerToSalesforce(customer, action) {
 
             storeLog("✅ Salesforce Lead Updated: " + dbCustomer.salesforce_lead_id);
         }
-
-        await mongoose.disconnect();
     } catch (error) {
         const { response, request, message } = error;
 
