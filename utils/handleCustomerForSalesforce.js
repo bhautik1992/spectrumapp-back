@@ -11,7 +11,7 @@ export async function handleCustomerForSalesforce(customer) {
         await mongoose.connect(process.env.MONGODB_URI);
 
         const settings = await Settings.findOne();
-        const { sp_app_url, admin_api_access_token } = settings;        
+        const { sp_app_url, admin_api_access_token, sf_access_token } = settings;        
         
         const customerId  = customer.id;
 
@@ -43,10 +43,10 @@ export async function handleCustomerForSalesforce(customer) {
         };
 
         storeLog('Reached');
-        
+
         const response = await axios.post(process.env.SF_LEAD_GENERATE_URL,leadPayload,{
             headers: {
-                Authorization: `Bearer ${process.env.SF_ACCESS_TOKEN}`,
+                Authorization: `Bearer ${sf_access_token}`,
                 "Content-Type": "application/json"
             }
         });

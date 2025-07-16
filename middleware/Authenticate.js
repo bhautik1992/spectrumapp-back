@@ -1,6 +1,5 @@
 import { verifyToken } from '../helpers/JWTToken.js';
 import { errorResponse } from '../helpers/ResponseHandler.js';
-import { storeLog } from '../helpers/Common.js';
 
 export const protectRoute = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
