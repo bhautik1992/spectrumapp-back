@@ -94,7 +94,6 @@ async function syncCustomerToSalesforce(customer, action) {
                 {
                     $set: {
                         shopify_request_body: JSON.stringify(customer),
-                        salesforce_lead_response_body: JSON.stringify(response.data),
                         lead_first_name: leadPayload.FirstName,
                         lead_last_name: leadPayload.LastName,
                         lead_email: leadPayload.Email,
