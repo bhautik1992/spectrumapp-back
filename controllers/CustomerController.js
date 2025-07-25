@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import { leadStatusLabels } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
+import { engagementChecklist } from '../config/constants.js';
 
 export const update = async (req, res) => {
     try{
@@ -37,6 +38,27 @@ export const update = async (req, res) => {
                 },
             }
         );
+
+        if(req.body?.engagement_type || req.body?.checklist_notes){
+            const engagementText = req.body.engagement_type && engagementChecklist[req.body.engagement_type]
+            ? engagementChecklist[req.body.engagement_type]
+            : '';
+
+            const checklistNotes = req.body.checklist_notes || '';
+
+            const notesPayload = {
+                Title: "Engagement Checklist",
+                Body: `${engagementText}${checklistNotes}`,
+                ParentId: sfLeadId,
+            }
+
+            await axios.patch(`${url}${process.env.SF_LEAD_NOTE}/${sfLeadId}`,notesPayload,{
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+        }
 
         storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Status Updated Successfully");
