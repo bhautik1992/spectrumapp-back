@@ -39,26 +39,28 @@ export const update = async (req, res) => {
             }
         );
 
-        if(req.body?.engagement_type || req.body?.checklist_notes){
-            const engagementText = req.body.engagement_type && engagementChecklist[req.body.engagement_type]
-            ? engagementChecklist[req.body.engagement_type]
-            : '';
 
-            const checklistNotes = req.body.checklist_notes || '';
+        
+        // if(req.body?.engagement_type || req.body?.checklist_notes){
+        //     const engagementText = req.body.engagement_type && engagementChecklist[req.body.engagement_type]
+        //     ? engagementChecklist[req.body.engagement_type]
+        //     : '';
 
-            const notesPayload = {
-                Title: "Engagement Checklist",
-                Body: `${engagementText}${checklistNotes}`,
-                ParentId: sfLeadId,
-            }
+        //     const checklistNotes = req.body.checklist_notes || '';
 
-            await axios.patch(`${url}${process.env.SF_LEAD_NOTE}/${sfLeadId}`,notesPayload,{
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-        }
+        //     const notesPayload = {
+        //         Title: "Engagement Checklist",
+        //         Body: `${engagementText}${checklistNotes}`,
+        //         ParentId: sfLeadId,
+        //     }
+
+        //     await axios.patch(`${url}${process.env.SF_LEAD_NOTE}/${sfLeadId}`,notesPayload,{
+        //         headers: {
+        //             Authorization: `Bearer ${token}`,
+        //             'Content-Type': 'application/json'
+        //         }
+        //     });
+        // }
 
         storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Status Updated Successfully");
