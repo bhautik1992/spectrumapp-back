@@ -1,5 +1,6 @@
 import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
+import Diary from "../models/Diary.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import { leadStatusLabels } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
@@ -10,10 +11,20 @@ export const edit = async (req, res) => {
     try{
         const { id } = req.params;
         
-        const role = await Customers.findById(id);
-        return successResponse(res, role);
+        const customer = await Customers.findById(id)
+        .populate({
+            path: 'diaries',
+            select: 'message sender_id createdAt',
+            options: { sort: { createdAt: -1 } },
+            populate: {
+                path: 'sender_id',
+                select: 'full_name'
+            }
+        });
+
+        return successResponse(res, customer);
     } catch (error) {
-        // console.log(error.message);
+        console.log(error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
 }
@@ -53,12 +64,13 @@ export const update = async (req, res) => {
             }
         );
 
-        if(req.body?.engagement_type || req.body?.checklist_notes){
+        // Engagement Checklist Step
+        if(req.body?.engagement_type || req.body?.engagement_note){
             const engagementText = req.body.engagement_type && engagementChecklist[req.body.engagement_type]
             ? engagementChecklist[req.body.engagement_type]
             : '';
 
-            const checklistNotes = ' | '+req.body.checklist_notes || '';
+            const checklistNotes = ' | '+req.body.engagement_note || '';
 
             const notesPayload = {
                 Title: "Engagement Checklist",
@@ -89,11 +101,11 @@ export const update = async (req, res) => {
             }
             
             if(req.body.engagement_type){
-                setData.engagement_option = req.body.engagement_type;
+                setData.engagement_type = req.body.engagement_type;
             }
             
-            if(req.body.checklist_notes){
-                setData.engagement_note = req.body.checklist_notes;
+            if(req.body.engagement_note){
+                setData.engagement_note = req.body.engagement_note;
             }
 
             await Customers.updateOne(
@@ -106,6 +118,15 @@ export const update = async (req, res) => {
             storeLog(noteResponse.data);
         }
         
+        // Sales & Admin Diary Step
+        if(req.body?.diary){
+            await Diary.create({
+                sender_id: req.body.loggedin_user_id,
+                customer_id: customer._id,
+                message: req.body.diary,
+            });
+        }
+
         storeLog('Lead Response');
         storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Status Updated Successfully");

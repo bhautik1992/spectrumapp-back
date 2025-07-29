@@ -28,7 +28,7 @@ const schema = new mongoose.Schema({
         default: 1,
         description: '1 = Web, 2 = Phone Inquiry, 3 = Partner - Referral, 4 = Purchased - List, 5 = Other, 6 = Shopify Registration' 
     },
-    engagement_option: {
+    engagement_type: {
         type: Number,
         enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] 
     },
@@ -43,6 +43,15 @@ schema.plugin(mongooseDelete, {
     overrideMethods: "all",  // Ensures soft-deleted records are hidden from normal queries
     deletedBy: false, // Optionally store the user who deleted the record
 });
+
+schema.virtual('diaries', {
+    ref: 'Diary',
+    localField: '_id',
+    foreignField: 'customer_id'
+});
+schema.set('toObject', { virtuals: true });
+schema.set('toJSON', { virtuals: true });
+
 
 export default schema;
 
