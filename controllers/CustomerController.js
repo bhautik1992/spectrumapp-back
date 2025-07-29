@@ -6,6 +6,18 @@ import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
 
+export const edit = async (req, res) => {
+    try{
+        const { id } = req.params;
+        
+        const role = await Customers.findById(id);
+        return successResponse(res, role);
+    } catch (error) {
+        // console.log(error.message);
+        return errorResponse(res, process.env.ERROR_MSG, 500);
+    }
+}
+
 export const update = async (req, res) => {
     try{
         const { shopify_cus_id, lead_status } = req.body;
