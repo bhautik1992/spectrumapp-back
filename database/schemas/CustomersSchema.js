@@ -6,6 +6,8 @@ const schema = new mongoose.Schema({
     shopify_request_body         : {type: String,required: true},
     salesforce_lead_id           : {type: String,required: true},
     salesforce_lead_response_body: {type: String,required: true},
+    salesforce_note_id           : {type: String},
+    salesforce_note_response_body: {type: String},
     lead_first_name              : {type: String},
     lead_last_name               : {type: String},
     lead_company                 : {type: String},
@@ -26,7 +28,12 @@ const schema = new mongoose.Schema({
         default: 1,
         description: '1 = Web, 2 = Phone Inquiry, 3 = Partner - Referral, 4 = Purchased - List, 5 = Other, 6 = Shopify Registration' 
     },
-    deletedAt                    : {type: Date}
+    engagement_option: {
+        type: Number,
+        enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] 
+    },
+    engagement_note: {type: String},
+    deletedAt      : {type: Date}
 },{
     timestamps: true
 });
