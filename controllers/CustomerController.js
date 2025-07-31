@@ -114,21 +114,43 @@ export const update = async (req, res) => {
                 { upsert: true }
             );
 
-            storeLog('Note Reponse');
-            storeLog(noteResponse.data);
+            // storeLog('Note Reponse');
+            // storeLog(noteResponse.data);
         }
         
         // Sales & Admin Diary Step
         if(req.body?.diary){
+            const chatterPayload = {
+                feedElementType: 'FeedItem',
+                subjectId: sfLeadId,
+                body: {
+                    messageSegments: [{ 
+                        type: 'Text', 
+                        text: req.body.diary
+                    }]
+                }
+            }
+
+            const chatterResponse = await axios.post(`${url}${process.env.SF_LEAD_CHATTER}`, chatterPayload, {
+                headers: { 
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json' 
+                }
+            });
+            
             await Diary.create({
                 sender_id: req.body.loggedin_user_id,
                 customer_id: customer._id,
                 message: req.body.diary,
+                response_body: JSON.stringify(chatterResponse.data)
             });
+
+            // storeLog('Chatter Reponse');
+            // storeLog(chatterResponse.data);
         }
 
-        storeLog('Lead Response');
-        storeLog(response.data);
+        // storeLog('Lead Response');
+        // storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Status Updated Successfully");
     }catch(error){
         storeLog(error?.response?.data || error.message);
@@ -141,3 +163,5 @@ export const update = async (req, res) => {
         });
     }
 }
+
+

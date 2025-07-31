@@ -12,7 +12,14 @@ const schema = new mongoose.Schema({
         ref: "Customers",
         required: true
     },
-    message: {type: String, trim: true},
+    message: {
+        type: String, 
+        trim: true
+    },
+    response_body: {
+        type: String,
+        required: true
+    },
     deletedAt: {type: Date}
 },{
     timestamps: true
