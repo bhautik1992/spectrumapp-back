@@ -24,7 +24,7 @@ export const edit = async (req, res) => {
 
         return successResponse(res, customer);
     } catch (error) {
-        console.log(error.message);
+        // console.log(error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
 }
@@ -163,5 +163,88 @@ export const update = async (req, res) => {
         });
     }
 }
+
+export const segmentList = async (req, res) => {
+    try{
+        const settings = await Settings.findOne();
+        const { sp_app_url:url, admin_api_access_token:token } = settings;
+        
+        const query = `
+            query {
+                segments(first: 250) {
+                    edges {
+                        cursor
+                        node {
+                            id
+                            name
+                            query
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        hasPreviousPage
+                    }
+                }
+            }
+        `;
+
+        const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,JSON.stringify({query}),{
+            headers: {
+                'X-Shopify-Access-Token': token,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const edges    = response.data?.data?.segments?.edges || [];
+        const segments = edges.map(edge => edge.node);
+        const pageInfo = response.data.data?.segments?.pageInfo || '';
+
+        return successResponse(res, {segments, pageInfo});
+    } catch (error) {
+        // console.log(error.message);
+        return errorResponse(res, process.env.ERROR_MSG, 500);
+    }
+}
+
+export const segmentRecords = async (req, res) => {
+    try {
+        const { id } = req.query;
+
+        const settings = await Settings.findOne();
+        const { sp_app_url: url, admin_api_access_token: token } = settings;
+  
+        const query = {
+            query: `query {
+                customerSegmentMembers(segmentId: "${id}", first: 10) {
+                    edges {
+                        node {
+                            id
+                            displayName
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }`
+        };
+  
+        const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,{
+            headers: {
+                'X-Shopify-Access-Token': token,
+                'Content-Type': 'application/json'
+            }
+        });
+  
+        const members = response.data?.data?.customerSegmentMembers?.edges || [];
+        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo;
+
+        return successResponse(res, {members, pageInfo});
+    } catch (error) {
+        // console.log( error.response?.data || error.message);
+        return errorResponse(res, process.env.ERROR_MSG, 500);
+    }
+};
 
 
