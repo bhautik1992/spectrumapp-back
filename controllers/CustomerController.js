@@ -208,14 +208,23 @@ export const segmentList = async (req, res) => {
 
 export const segmentRecords = async (req, res) => {
     try {
-        const { id } = req.query;
+        let cursorClause = 'first: 10';
+        const { id, before, after, isNext } = req.query;
+        
+        if(isNext !== undefined){
+            if(isNext === 'true'){
+                cursorClause = ` first: 10, after: "${after}"`;
+            }else{
+                cursorClause = ` last: 10, before: "${before}"`;
+            }
+        }
 
         const settings = await Settings.findOne();
         const { sp_app_url: url, admin_api_access_token: token } = settings;
   
         const query = {
             query: `query {
-                customerSegmentMembers(segmentId: "${id}", first: 10) {
+                customerSegmentMembers(segmentId: "${id}", ${cursorClause}) {
                     edges {
                         node {
                             id
@@ -224,12 +233,14 @@ export const segmentRecords = async (req, res) => {
                     }
                     pageInfo {
                         hasNextPage
+                        startCursor
                         endCursor
+                        hasPreviousPage
                     }
                 }
             }`
         };
-  
+        
         const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,{
             headers: {
                 'X-Shopify-Access-Token': token,
@@ -238,7 +249,7 @@ export const segmentRecords = async (req, res) => {
         });
   
         const members = response.data?.data?.customerSegmentMembers?.edges || [];
-        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo;
+        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || '';
 
         return successResponse(res, {members, pageInfo});
     } catch (error) {
