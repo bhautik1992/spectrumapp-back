@@ -249,7 +249,7 @@ export const segmentRecords = async (req, res) => {
         });
   
         const members = response.data?.data?.customerSegmentMembers?.edges || [];
-        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || '';
+        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
 
         return successResponse(res, {members, pageInfo});
     } catch (error) {
