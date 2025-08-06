@@ -208,14 +208,14 @@ export const segmentList = async (req, res) => {
 
 export const segmentRecords = async (req, res) => {
     try {
-        let cursorClause = 'first: 10';
-        const { id, before, after, isNext } = req.query;
+        const { id, perPage, before, after, isNext } = req.query;
+        let cursorClause = `first: ${perPage}`; 
         
         if(isNext !== undefined){
             if(isNext === 'true'){
-                cursorClause = ` first: 10, after: "${after}"`;
+                cursorClause = ` first: ${perPage}, after: "${after}"`;
             }else{
-                cursorClause = ` last: 10, before: "${before}"`;
+                cursorClause = ` last: ${perPage}, before: "${before}"`;
             }
         }
 
@@ -229,6 +229,25 @@ export const segmentRecords = async (req, res) => {
                         node {
                             id
                             displayName
+                            defaultEmailAddress{
+                                emailAddress
+                                marketingState
+                            }
+                            defaultAddress {
+                                address1
+                                city
+                                province
+                                country
+                                zip
+                            }
+                            amountSpent{
+                                amount
+                                currencyCode
+                            }
+                            defaultPhoneNumber{
+                                phoneNumber
+                            }
+                            numberOfOrders
                         }
                     }
                     pageInfo {
