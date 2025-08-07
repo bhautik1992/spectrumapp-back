@@ -18,7 +18,7 @@ export const edit = async (req, res) => {
             options: { sort: { createdAt: -1 } },
             populate: {
                 path: 'sender_id',
-                select: 'full_name'
+                select: 'full_name color_code'
             }
         });
 
