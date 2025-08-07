@@ -84,4 +84,16 @@ export const getUsers = async (req, res) => {
     }
 };
 
+export const update = async (req, res) => {
+    try {
+        const input = req.body;
+        
+        const user = await User.findOneAndUpdate({_id:input.id}, input, { new: true, upsert: true }).select(User.hidden);
+        return successResponse(res, user, "Profile Updated Successfully");
+    } catch (error) {
+        // console.log(error.message)
+        return errorResponse(res, process.env.ERROR_MSG, 500);
+    }
+}
+
 

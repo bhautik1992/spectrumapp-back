@@ -7,6 +7,7 @@ const schema = new mongoose.Schema({
     email              : {type: String, required: true, maxlength: 50, unique: true},
     profile_photo      : {type: String},
     password           : {type: String, required: true, minlength: 8, maxlength: 10},
+    color_code         : {type: String, default: '#ffffff'},
     status             : {type: Boolean, default: 1, description: '0 = In-Active, 1 = Active'},
     reset_token        : {type: String, maxlength: 200},
     reset_token_expires: {type: Date},
@@ -14,6 +15,8 @@ const schema = new mongoose.Schema({
 },{
     timestamps: true
 });
+
+schema.statics.hidden = '-password -createdAt -updatedAt -deleted -__v';
 
 schema.plugin(mongooseDelete, { 
     deletedAt: true, // Adds deletedAt field
