@@ -18,4 +18,6 @@ export const engagementChecklist = {
     10:'Not interested',
 }
 
+export const lowStockThreshold = 5;
+
 

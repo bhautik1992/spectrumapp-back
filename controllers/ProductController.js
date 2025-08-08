@@ -2,11 +2,11 @@ import Settings from "../models/Settings.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import axios from 'axios';
 import { storeLog } from "../helpers/Common.js";
-
+import { lowStockThreshold } from '../config/constants.js';
 
 export const index = async (req, res) => {
     try{
-        const { perPage, before, after, isNext } = req.query;
+        const { perPage, before, after, isNext, filter } = req.query;
         let cursorClause = `first: ${perPage}`; 
         
         if(isNext !== undefined){
@@ -17,10 +17,14 @@ export const index = async (req, res) => {
             }
         }
 
+        if (filter == 1) {
+            cursorClause += `, query: "inventory_total:<=${lowStockThreshold}"`;
+            // cursorClause += `, query: "inventory_total:<5 AND tracks_inventory:true"`;
+        }
+        
         const settings = await Settings.findOne();
         const { sp_app_url: url, admin_api_access_token: token } = settings;
-        const lowStockThreshold = 5;
-
+        
         const query = {
             query: `query {
                 products(${cursorClause}) {
@@ -98,10 +102,6 @@ export const index = async (req, res) => {
         //         }
         //       };
         // });
-
-        // (Optional) filter low stock products if needed
-        // const lowStockProducts = products.filter(product => product.lowStock);
-        // const products = products1.filter(product => product.node.totalInventory <= 5);
 
         return successResponse(res, {products, pageInfo});      
     } catch (error) {
