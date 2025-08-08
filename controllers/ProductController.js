@@ -19,7 +19,6 @@ export const index = async (req, res) => {
 
         if (filter == 1) {
             cursorClause += `, query: "inventory_total:<=${lowStockThreshold}"`;
-            // cursorClause += `, query: "inventory_total:<5 AND tracks_inventory:true"`;
         }
         
         const settings = await Settings.findOne();
@@ -69,9 +68,12 @@ export const index = async (req, res) => {
                         hasPreviousPage
                     }
                 }
+                productsCount {
+                    count
+                }
             }`
         };
-        
+
         const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,{
             headers: {
                 'X-Shopify-Access-Token': token,
@@ -81,6 +83,7 @@ export const index = async (req, res) => {
 
         const products = response.data?.data?.products?.edges || [];
         const pageInfo = response.data?.data?.products?.pageInfo || {};
+        const total = response.data?.data?.productsCount?.count || 0;
 
         // const products = productsInfo.map(edge => {
         //     const product = edge.node;
@@ -103,7 +106,7 @@ export const index = async (req, res) => {
         //       };
         // });
 
-        return successResponse(res, {products, pageInfo});      
+        return successResponse(res, {products, pageInfo, total});      
     } catch (error) {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
