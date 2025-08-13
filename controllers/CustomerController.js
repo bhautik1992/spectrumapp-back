@@ -6,6 +6,7 @@ import { leadStatusLabels } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
+import jsforce from 'jsforce';
 
 export const edit = async (req, res) => {
     try{
@@ -44,6 +45,7 @@ export const update = async (req, res) => {
         const sfLeadId = customer.salesforce_lead_id;
         const sfNoteId = customer.salesforce_note_id;
 
+        // Customer Details Step
         const payload  = {
             Status : leadStatusLabels[lead_status],
         };
@@ -149,6 +151,10 @@ export const update = async (req, res) => {
             // storeLog(chatterResponse.data);
         }
 
+        if(lead_status === 3){
+            await convertLeadToContact(settings,shopify_cus_id,sfLeadId);
+        }
+
         // storeLog('Lead Response');
         // storeLog(response.data);
         return successResponse(res, response.data.id, "Lead Status Updated Successfully");
@@ -162,6 +168,37 @@ export const update = async (req, res) => {
             error: error?.response?.data || error.message
         });
     }
+}
+
+export const convertLeadToContact = async (settings,shopify_cus_id,sfLeadId) => {
+    const { sf_username:username, sf_security_token:sstoken }  = settings ;
+
+    const conn = new jsforce.Connection({loginUrl: process.env.SF_LOGIN_URL});
+    await conn.login(username,process.env.SF_PSW + sstoken);
+    
+    const payload = {
+        leadId: sfLeadId,
+        convertedStatus: leadStatusLabels[3],
+        // doNotCreateOpportunity: true
+    };
+
+    const result = await conn.soap.convertLead(payload);
+    
+    if(result.success){
+        await Customers.updateOne(
+            { shopify_cus_id: shopify_cus_id },
+            {
+                $set: {
+                    salesforce_contact_id: result.contactId,
+                    salesforce_account_id: result.accountId,
+                    // salesforce_opportunity_id: result.opportunityId,
+                    is_lead_converted: 1,
+                },
+            }
+        );
+    }
+    
+    return result;
 }
 
 export const segmentList = async (req, res) => {
