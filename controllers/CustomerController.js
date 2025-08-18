@@ -179,7 +179,7 @@ export const convertLeadToContact = async (settings,shopify_cus_id,sfLeadId) => 
     const payload = {
         leadId: sfLeadId,
         convertedStatus: leadStatusLabels[3],
-        // doNotCreateOpportunity: true
+        doNotCreateOpportunity: true
     };
 
     const result = await conn.soap.convertLead(payload);
