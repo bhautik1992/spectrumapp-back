@@ -153,6 +153,7 @@ export const update = async (req, res) => {
 
         if(lead_status === 3){
             await convertLeadToContact(settings,shopify_cus_id,sfLeadId);
+            await convertCustomerToCompany(settings,customer);
         }
 
         // storeLog('Lead Response');
@@ -199,6 +200,104 @@ export const convertLeadToContact = async (settings,shopify_cus_id,sfLeadId) => 
     }
     
     return result;
+}
+
+export const convertCustomerToCompany = async (settings, customer) => {
+    const { sp_app_url: url, admin_api_access_token: token } = settings;
+    const companyName   = `${customer.lead_first_name || ''} ${customer.lead_last_name || ''}`.trim() || customer.lead_email;
+    const customerId    = `gid://shopify/Customer/${customer.shopify_cus_id}`;
+
+    const headers = {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": token,
+    };
+
+    // STEP 1: Create the company
+    const mutationCreate = `mutation CreateCompany($input: CompanyCreateInput!) {
+        companyCreate(input: $input) {
+            company {
+                id
+                name
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }`;
+
+    const createRes = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+        {
+            query: mutationCreate,
+            variables: {
+                input: {
+                    company: {
+                        name: companyName,
+                    },
+                },
+            },
+        },
+        { headers }
+    );
+
+    const company = createRes.data?.data?.companyCreate?.company;
+    if(!company?.id){
+        throw new Error(`Failed to create company: ${JSON.stringify(
+            createRes.data?.data?.companyCreate?.userErrors || createRes.data?.errors
+        )}`);
+    }
+
+    await Customers.updateOne(
+        { shopify_cus_id: customer.shopify_cus_id },
+        {
+            $set: {
+                shopify_company_response:JSON.stringify(createRes.data),
+                shopify_company_id:company.id,
+            },
+        }
+    );
+
+    // STEP 2: Assign the customer as a company contact
+    const mutationAssign = `mutation AssignCustomer($companyId: ID!, $customerId: ID!) {
+        companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+            companyContact {
+                id
+                customer { id email }
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }`;
+
+    const assignRes = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,{
+            query: mutationAssign,
+            variables: { companyId: company.id, customerId },
+        },
+        { headers }
+    );
+
+    const assignResult = assignRes.data?.data?.companyAssignCustomerAsContact;
+    if (!assignResult?.companyContact?.id) {
+        throw new Error(
+            `Failed to assign customer as company contact: ${JSON.stringify(
+                assignResult?.userErrors || assignRes.data?.errors
+            )}`
+        );
+    }
+    
+    await Customers.updateOne(
+        { shopify_cus_id: customer.shopify_cus_id },
+        {
+            $set: {
+                shopify_company_contact_response:JSON.stringify(assignRes.data),
+                shopify_company_contact_id:assignResult.companyContact.id,
+            },
+        }
+    );
+
+    return true;
 }
 
 export const segmentList = async (req, res) => {
