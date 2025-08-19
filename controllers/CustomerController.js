@@ -287,15 +287,95 @@ export const convertCustomerToCompany = async (settings, customer) => {
         );
     }
     
+    const companyContactId = assignResult.companyContact.id;
     await Customers.updateOne(
         { shopify_cus_id: customer.shopify_cus_id },
         {
             $set: {
                 shopify_company_contact_response:JSON.stringify(assignRes.data),
-                shopify_company_contact_id:assignResult.companyContact.id,
+                shopify_company_contact_id:companyContactId,
             },
         }
     );
+
+    // // STEP 3: Approve ordering for the assigned contact
+    // const queryLocations = `{locations(first: 10) {
+    //     edges {
+    //         node {
+    //             id
+    //             name
+    //         }
+    //     }
+    // }}`;
+
+    // const locRes = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+    //     { 
+    //         query: queryLocations 
+    //     },
+    //     { headers }
+    // );
+
+    // console.log("Locations Response:", JSON.stringify(locRes.data, null, 2));
+
+    // const locations = locRes.data?.data?.locations?.edges || [];
+    // if (!locations.length) {
+    //     throw new Error("No locations found in your shop.");
+    // }
+
+    // const locationId = locations[0].node.id;
+    // console.log("Using locationId:", locationId);
+
+    // const mutationApproveOrdering = `mutation AssignOrderingPermission($companyContactId: ID!, $locationId: ID!) {
+    //     companyContactAssignRole(
+    //         companyContactId: $companyContactId
+    //         companyContactRole: {
+    //             ordering: { locationId: $locationId, permitted: true }
+    //         }
+    //     ) {
+    //         companyContact {
+    //             id
+    //             customer {
+    //                 id
+    //                 email
+    //             }
+    //             roles {
+    //                 ordering {
+    //                     location {
+    //                         id
+    //                         name
+    //                     }
+    //                     permitted
+    //                 }
+    //             }
+    //         }
+    //         userErrors {
+    //             field
+    //             message
+    //         }
+    //     }
+    // }`;
+    
+    // const approveRes = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+    //     {
+    //         query: mutationApproveOrdering,
+    //         variables: { companyContactId, locationId },
+    //     },
+    //     { headers }
+    // );
+
+    // console.log("Approve Ordering Response:",JSON.stringify(approveRes.data, null, 2));
+
+    // const approveResult = approveRes.data?.data?.companyContactAssignRole?.companyContact;
+    // if (!approveResult?.roles?.ordering?.length) {
+    //     throw new Error(
+    //         `Failed to approve ordering: ${JSON.stringify(
+    //             approveRes.data?.data?.companyContactAssignRole?.userErrors ||
+    //                 approveRes.data?.errors
+    //         )}`
+    //     );
+    // }
+
+    // console.log("Ordering Approved ✅ for contact:", approveResult.customer.email);
 
     return true;
 }
