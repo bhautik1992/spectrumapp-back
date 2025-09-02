@@ -151,12 +151,18 @@ export const index = async (req, res) => {
             });
 
             // Return top 100 selling products in last one month
-            const sortedProducts = Object.values(salesMap).sort((a, b) => b.quantity - a.quantity);
-            const topProducts    = sortedProducts.slice(0, 100);
-            const productIds     = topProducts.map(p => p.id);
+            let sortedProducts = Object.values(salesMap);
+            if (filter == 2 || filter == 4) {
+                sortedProducts = sortedProducts.sort((a, b) => b.quantity - a.quantity);
+            } else if (filter == 3 || filter == 5) {
+                sortedProducts = sortedProducts.sort((a, b) => a.quantity - b.quantity);
+            }
+            
+            const topProducts = sortedProducts.slice(0, 100);
+            const productIds  = topProducts.map(p => p.id);
 
             if (!productIds.length) {
-                return successResponse(res, {products:[], pageInfo: {} , total: 0});
+                return successResponse(res, {products: [], pageInfo: {}, total: 0});
             }
 
             const query = {
