@@ -1,6 +1,7 @@
 import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
+import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
 import { leadStatusLabels } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
@@ -149,6 +150,19 @@ export const update = async (req, res) => {
 
             // storeLog('Chatter Reponse');
             // storeLog(chatterResponse.data);
+        }
+
+        // Event Planning Step 
+        if(req.body?.title){
+            await Events.create({
+                user_id    : req.body.loggedin_user_id,
+                customer_id: customer._id,
+                title      : req.body.title,
+                date       : req.body.date,
+                url        : req.body.url || undefined,
+                location   : req.body.location || undefined,
+                description: req.body.description || undefined,
+            });
         }
 
         if(lead_status === 3){
