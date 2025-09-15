@@ -62,6 +62,13 @@ schema.virtual('diaries', {
     localField: '_id',
     foreignField: 'customer_id'
 });
+
+schema.virtual('events', {
+    ref: 'Events',
+    localField: '_id',
+    foreignField: 'customer_id',
+});
+
 schema.set('toObject', { virtuals: true });
 schema.set('toJSON', { virtuals: true });
 

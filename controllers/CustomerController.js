@@ -22,6 +22,11 @@ export const edit = async (req, res) => {
                 path: 'sender_id',
                 select: 'full_name color_code'
             }
+        })
+        .populate({
+            path: 'events',
+            select: 'title date url location description',
+            options: { sort: { date: 1 } }
         });
 
         return successResponse(res, customer);
