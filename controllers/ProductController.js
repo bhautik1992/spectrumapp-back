@@ -6,7 +6,7 @@ import { lowStockThreshold } from '../config/constants.js';
 
 export const index = async (req, res) => {
     try{
-        const { perPage, before, after, isNext, filter } = req.query;
+        const { perPage, before, after, isNext, filter, picker } = req.query;
         let cursorClause = `first: ${perPage}`; 
         
         if(isNext !== undefined){
@@ -88,9 +88,11 @@ export const index = async (req, res) => {
 
             return successResponse(res, {products, pageInfo, total});   
         }else{
-            const dateStr = getDateFilter(filter);
-            
-            let allOrders = [];
+            let startDate    = new Date(picker[0]).toISOString().split("T")[0];
+            let endDate      = new Date(picker[1]).toISOString().split("T")[0];
+            const dateFilter = `created_at:>=${startDate} AND created_at:<=${endDate}`;
+        
+            const salesMap = {};
             let afterCursorFetch = null;
             let hasNextPageFetch = true;
 
@@ -98,9 +100,10 @@ export const index = async (req, res) => {
             while (hasNextPageFetch) {
                 const cursorClause = afterCursorFetch ? `first: 250, after: "${afterCursorFetch}"` : `first: 250`;
 
+                // orders(${cursorClause}, query: "created_at:>=${dateStr}") {
                 const orders = {
                     query: `query {
-                        orders(${cursorClause}, query: "created_at:>=${dateStr}") {
+                        orders(${cursorClause}, query: "${dateFilter}") {
                             edges {
                                 node {
                                     id
@@ -136,36 +139,34 @@ export const index = async (req, res) => {
                 });
 
                 const edges = ordersResp.data?.data?.orders?.edges || [];
-                allOrders = allOrders.concat(edges);
+
+                // Step 2: Aggregate product quantities
+                edges.forEach(order => {
+                    order.node.lineItems.edges.forEach(item => {
+                        const productId = item.node.product?.id;
+                        if (!productId) return;
+
+                        if (!salesMap[productId]) {
+                            salesMap[productId] = { 
+                                id: productId, 
+                                title: item.node.product.title, 
+                                quantity: 0 
+                            };
+                        }
+
+                        salesMap[productId].quantity += item.node.quantity;
+                    });
+                });
 
                 const pageInfoResp = ordersResp.data?.data?.orders?.pageInfo || {};
                 hasNextPageFetch = pageInfoResp.hasNextPage;
                 afterCursorFetch = pageInfoResp.endCursor;
             }
 
-            // Step 2: Aggregate product quantities
-            const salesMap = {};
-            allOrders.forEach(order => {
-                order.node.lineItems.edges.forEach(item => {
-                    const productId = item.node.product?.id;
-                    if (!productId) return;
-
-                    if (!salesMap[productId]) {
-                        salesMap[productId] = { 
-                            id: productId, 
-                            title: item.node.product.title, 
-                            quantity: 0 
-                        };
-                    }
-
-                    salesMap[productId].quantity += item.node.quantity;
-                });
-            });
-
             // Step 3: Sort products by quantity
             let sortedProducts = Object.values(salesMap);
-            if (filter == 2 || filter == 4) sortedProducts.sort((a, b) => b.quantity - a.quantity);
-            else if (filter == 3 || filter == 5) sortedProducts.sort((a, b) => a.quantity - b.quantity);
+            if (filter == 2) sortedProducts.sort((a, b) => b.quantity - a.quantity);
+            else if (filter == 3) sortedProducts.sort((a, b) => a.quantity - b.quantity);
 
             // Step 4: Manual cursor-based pagination
             const decodeCursor = (cursor) => {
@@ -196,51 +197,59 @@ export const index = async (req, res) => {
             if (!productIds.length) return successResponse(res, { products: [], pageInfo: {}, total: 0 });
 
             // Step 5: Fetch product details from Shopify
-            const query = {
-                query: `query {
-                    nodes(ids: ${JSON.stringify(productIds)}) {
-                        ... on Product {
-                            id
-                            title
-                            vendor
-                            productType
-                            totalInventory
-                            tracksInventory
-                            status
-                            hasOnlyDefaultVariant
-                            variantsCount { 
-                                count 
-                            }
-                            category { 
-                                id 
-                                name 
-                            }
-                            variants(first: 250) {
-                                edges { 
-                                    node { 
-                                        id 
-                                        title 
-                                        inventoryQuantity 
-                                    } 
+            const chunkSize = 250;
+            let allProductDetails = [];
+            for (let i = 0; i < productIds.length; i += chunkSize) {
+                const chunk = productIds.slice(i, i + chunkSize);
+
+                const query = {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Product {
+                                id
+                                title
+                                vendor
+                                productType
+                                totalInventory
+                                tracksInventory
+                                status
+                                hasOnlyDefaultVariant
+                                variantsCount { 
+                                    count 
                                 }
-                                pageInfo { 
-                                    hasNextPage 
-                                    startCursor 
-                                    endCursor 
-                                    hasPreviousPage 
+                                category { 
+                                    id 
+                                    name 
+                                }
+                                variants(first: 250) {
+                                    edges { 
+                                        node { 
+                                            id 
+                                            title 
+                                            inventoryQuantity 
+                                        } 
+                                    }
+                                    pageInfo { 
+                                        hasNextPage 
+                                        startCursor 
+                                        endCursor 
+                                        hasPreviousPage 
+                                    }
                                 }
                             }
                         }
-                    }
-                }`
-            };
+                    }`
+                };
 
-            const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, {
-                headers: { 
-                    'X-Shopify-Access-Token': token,
-                    'Content-Type': 'application/json'
-                }
-            });
+                const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, {
+                    headers: { 
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                allProductDetails = allProductDetails.concat(response.data?.data?.nodes || []);
+            }
 
             // Step 6: Build Shopify-style pageInfo
             const encodeCursor = (product) => {
@@ -254,7 +263,7 @@ export const index = async (req, res) => {
                 endCursor: paginatedProducts[paginatedProducts.length - 1] ? encodeCursor(paginatedProducts[paginatedProducts.length - 1]) : null
             };
 
-            const products = (response.data?.data?.nodes || []).map(p => ({
+            const products = allProductDetails.map(p => ({
                 node: {
                     ...p,
                     qty: salesMap[p.id]?.quantity || 0
@@ -268,18 +277,6 @@ export const index = async (req, res) => {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
-}
-
-function getDateFilter(filter) { 
-    const date = new Date(); 
-    
-    if (filter == 2 || filter == 3) { 
-        date.setMonth(date.getMonth() - 1);
-    } else if (filter == 4 || filter == 5) { 
-        date.setMonth(date.getMonth() - 2); 
-    } 
-    
-    return date.toISOString().split('T')[0]; 
 }
 
 
