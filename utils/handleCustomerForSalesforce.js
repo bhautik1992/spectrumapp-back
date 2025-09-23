@@ -20,6 +20,74 @@ async function syncCustomerToSalesforce(customer, action) {
         await connectDB();
 
         const settings = await Settings.findOne();
+        const { sp_app_url, admin_api_access_token } = settings;
+
+        const shopifyCus = await axios.get(`${sp_app_url}/admin/api/2025-07/customers/${customer.id}.json`, {
+            headers: {
+                'X-Shopify-Access-Token': admin_api_access_token,
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const cusInfo = shopifyCus.data.customer;
+        const tags = cusInfo.tags?.split(',').map(tag => tag.trim()) || [];
+
+        if (!tags.includes("New Trade Account Registration")) {
+            storeLog("Tag mismatch: Skipping Salesforce sync.");
+            return;
+        }
+
+        if (action === 'create') {
+            await Customers.create({
+                shopify_cus_id      : customer.id,
+                shopify_request_body: JSON.stringify(customer),
+                lead_first_name     : cusInfo.first_name || "",
+                lead_last_name      : cusInfo.last_name || "Shopify User",
+                lead_email          : cusInfo.email,
+                lead_company        : cusInfo.default_address?.company || "Individual",
+                lead_phone          : cusInfo.phone || "",
+                lead_description    : `Shopify ID: ${customer.id}`,
+                lead_source         : 6 //"Shopify Registration"
+            });
+        } else if (action === 'update') {
+            await Customers.updateOne(
+                { shopify_cus_id: customer.id },
+                {
+                    $set: {
+                        shopify_request_body: JSON.stringify(customer),
+                        lead_first_name     : cusInfo.first_name || "",
+                        lead_last_name      : cusInfo.last_name || "Shopify User",
+                        lead_email          : cusInfo.email,
+                        lead_company        : cusInfo.default_address?.company || "Individual",
+                        lead_phone          : cusInfo.phone || "",
+                        lead_description    : `Shopify ID: ${customer.id}`,
+                    }
+                }
+            );
+        }
+    } catch (error) {
+        const { response, request, message } = error;
+
+        if (response) {
+            storeLog("❌ Salesforce API Error:");
+            storeLog("Status: " + response.status);
+            storeLog("Headers: " + JSON.stringify(response.headers));
+            storeLog("Data: " + JSON.stringify(response.data));
+        } else if (request) {
+            storeLog("❌ No response received from Salesforce");
+        } else {
+            storeLog("❌ Unexpected Error: " + message);
+        }
+
+        storeLog("Full Error: " + JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    }
+}
+
+async function _syncCustomerToSalesforce(customer, action) {
+    try {
+        await connectDB();
+
+        const settings = await Settings.findOne();
         const { sp_app_url, admin_api_access_token, sf_access_token } = settings;
 
         const shopifyCus = await axios.get(`${sp_app_url}/admin/api/2025-07/customers/${customer.id}.json`, {

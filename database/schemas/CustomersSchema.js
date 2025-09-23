@@ -5,21 +5,26 @@ const schema = new mongoose.Schema({
     shopify_cus_id               : {type: String,required: true},
     shopify_request_body         : {type: String,required: true},
     
-    salesforce_lead_id           : {type: String,required: true},
-    salesforce_lead_response_body: {type: String,required: true},
+    salesforce_lead_id           : {
+        type: String,
+        // required: true
+    },
+    salesforce_lead_response_body: {
+        type: String,
+        // required: true
+    },
 
-    salesforce_note_id           : {type: String},
-    salesforce_note_response_body: {type: String},
+    // salesforce_note_id           : {type: String},
+    // salesforce_note_response_body: {type: String},
     
-    salesforce_contact_id        : {type: String},
-    salesforce_account_id        : {type: String},
-    // salesforce_opportunity_id    : {type: String},
+    // salesforce_contact_id        : {type: String},
+    // salesforce_account_id        : {type: String},
     is_lead_converted            : {type: Boolean, default: 0, description: '0 = Lead Not Converted, 1 = Lead Converted'},
     
-    shopify_company_response        : {type: String},
-    shopify_company_id              : {type: String},
-    shopify_company_contact_response: {type: String},
-    shopify_company_contact_id      : {type: String},
+    // shopify_company_response        : {type: String},
+    // shopify_company_id              : {type: String},
+    // shopify_company_contact_response: {type: String},
+    // shopify_company_contact_id      : {type: String},
 
     lead_first_name              : {type: String},
     lead_last_name               : {type: String},
