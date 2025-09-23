@@ -55,7 +55,8 @@ export const update = async (req, res) => {
         );
 
         // Engagement Checklist Step
-        if(req.body?.engagement_type || req.body?.engagement_note){            
+        if(req.body?.engagement_type || req.body?.engagement_note){  
+            let setData = {};          
             if(req.body.engagement_type){
                 setData.engagement_type = req.body.engagement_type;
             }
