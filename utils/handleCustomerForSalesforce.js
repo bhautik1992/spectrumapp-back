@@ -17,6 +17,7 @@ export async function handleUpdateCustomerForSalesforce(customer) {
 
 async function syncCustomerToSalesforce(customer, action) {
     try {
+        storeLog("Execute syncCustomerToSalesforce function");
         await connectDB();
 
         const settings = await Settings.findOne();
@@ -38,6 +39,7 @@ async function syncCustomerToSalesforce(customer, action) {
         }
 
         if (action === 'create') {
+            storeLog("Create Customer");
             await Customers.create({
                 shopify_cus_id      : customer.id,
                 shopify_request_body: JSON.stringify(customer),
@@ -50,6 +52,7 @@ async function syncCustomerToSalesforce(customer, action) {
                 lead_source         : 6 //"Shopify Registration"
             });
         } else if (action === 'update') {
+            storeLog("Update Customer");
             await Customers.updateOne(
                 { shopify_cus_id: customer.id },
                 {
@@ -65,6 +68,8 @@ async function syncCustomerToSalesforce(customer, action) {
                 }
             );
         }
+
+        storeLog("Process Executed");
     } catch (error) {
         const { response, request, message } = error;
 
