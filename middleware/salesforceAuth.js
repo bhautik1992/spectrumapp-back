@@ -4,6 +4,9 @@ import axios from 'axios';
 import { storeLog } from '../helpers/Common.js';
 
 export const salesforceAuth = async (req, res, next) => {
+    storeLog('Execute salesforceAuth');
+    next();
+
     try {
         const settings = await Settings.findOne();
         if (!settings || !settings.sf_instance_url || !settings.sf_client_id || !settings.sf_client_secret) {
