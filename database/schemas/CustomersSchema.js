@@ -37,9 +37,9 @@ const schema = new mongoose.Schema({
     lead_source: {
         type: Number,
         required: true,
-        enum: [1, 2, 3, 4, 5, 6],
+        enum: [1, 2, 3, 4, 5, 6, 7],
         default: 1,
-        description: '1 = Web, 2 = Phone Inquiry, 3 = Partner - Referral, 4 = Purchased - List, 5 = Other, 6 = Shopify Registration' 
+        description: '1 = Web, 2 = Phone Inquiry, 3 = Partner - Referral, 4 = Purchased - List, 5 = Other, 6 = Shopify Registration, 7 = Migrate Customer' 
     },
     engagement_type: {
         type: Number,

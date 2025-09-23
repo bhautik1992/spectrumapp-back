@@ -512,4 +512,89 @@ export const segmentRecords = async (req, res) => {
     }
 };
 
+export const listCustomers = async (req, res) => {
+    try {
+        const batchNumber = parseInt(req.query.batchNumber);
+        const batchSize   = parseInt(req.query.batchSize);
+        
+        if (batchSize < 1 || batchSize > 250) {
+            return errorResponse(res,'Batch size must be between 1 and 250',400);
+        }
+
+        const settings = await Settings.findOne();
+        const { sp_app_url, admin_api_access_token } = settings;
+
+        let allFilteredCustomers = [];
+        let pageInfo             = null;
+        let hasNextPage          = true;
+
+        while (hasNextPage) {
+            let url = `${sp_app_url}/admin/api/2025-07/customers.json?limit=250`;
+            if (pageInfo) url += `&page_info=${pageInfo}`;
+
+            const response = await axios.get(url, {
+                headers: {
+                    "X-Shopify-Access-Token": admin_api_access_token,
+                    "Content-Type": "application/json",
+                },
+            });
+
+            let customers = response.data?.customers || [];
+            for (const cus of customers) {
+                if (cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")) {
+                    
+                    // await Customers.create({
+                    //     shopify_cus_id: cus.id,
+                    //     shopify_request_body: JSON.stringify(cus),
+                    //     // salesforce_lead_id: response.data.id,
+                    //     // salesforce_lead_response_body: JSON.stringify(response.data),
+                    //     lead_first_name: cus.first_name,
+                    //     lead_last_name: cus.last_name,
+                    //     lead_email: cus.email,
+                    //     lead_company: cus.default_address?.company || "Individual",
+                    //     lead_phone: cus.phone || "",
+                    //     lead_description: `Shopify ID: ${cus.id}`,
+                    //     lead_source: 7 //"Migrate Customer"
+                    // });
+
+                    allFilteredCustomers.push(cus);
+                }
+            }
+
+            // customers = customers.filter(cus =>
+            //     cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")
+            // ); 
+            // allFilteredCustomers.push(...customers);
+
+            // Check if next page exists
+            const linkHeader = response.headers["link"];
+            if (linkHeader && linkHeader.includes('rel="next"')) {
+                const match = linkHeader.match(/page_info=([^&>]+)/);
+                pageInfo = match ? match[1] : null;
+            } else {
+                hasNextPage = false;
+            }
+
+            // Stop fetching if we already collected enough for our requested batch
+            if (allFilteredCustomers.length >= batchNumber * batchSize) break;
+        }
+
+        // Slice the batch from the full filtered list
+        const startIndex = (batchNumber - 1) * batchSize;
+        const endIndex = startIndex + batchSize;
+        const batchCustomers = allFilteredCustomers.slice(startIndex, endIndex);
+
+        return successResponse(res, {
+            batchNumber,
+            batchSize,
+            fetchedCount: batchCustomers.length,
+            customers: batchCustomers
+        },'Customers fetched and saved successfully');
+    } catch (error) {
+        // console.log(error.response?.data || error.message);
+        // return errorResponse(res, process.env.ERROR_MSG, 500);
+        return errorResponse(res, error.response?.data || error.message, 500);
+    }  
+};
+
 
