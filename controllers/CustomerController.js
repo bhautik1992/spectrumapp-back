@@ -614,19 +614,19 @@ export const listCustomers = async (req, res) => {
             for (const cus of customers) {
                 if (cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")) {
                     
-                    // await Customers.create({
-                    //     shopify_cus_id: cus.id,
-                    //     shopify_request_body: JSON.stringify(cus),
-                    //     // salesforce_lead_id: response.data.id,
-                    //     // salesforce_lead_response_body: JSON.stringify(response.data),
-                    //     lead_first_name: cus.first_name,
-                    //     lead_last_name: cus.last_name,
-                    //     lead_email: cus.email,
-                    //     lead_company: cus.default_address?.company || "Individual",
-                    //     lead_phone: cus.phone || "",
-                    //     lead_description: `Shopify ID: ${cus.id}`,
-                    //     lead_source: 7 //"Migrate Customer"
-                    // });
+                    await Customers.create({
+                        shopify_cus_id: cus.id,
+                        shopify_request_body: JSON.stringify(cus),
+                        // salesforce_lead_id: response.data.id,
+                        // salesforce_lead_response_body: JSON.stringify(response.data),
+                        lead_first_name: cus.first_name,
+                        lead_last_name: cus.last_name,
+                        lead_email: cus.email,
+                        lead_company: cus.default_address?.company || "Individual",
+                        lead_phone: cus.phone || "",
+                        lead_description: `Shopify ID: ${cus.id}`,
+                        lead_source: 7 //"Migrate Customer"
+                    });
 
                     allFilteredCustomers.push(cus);
                 }
