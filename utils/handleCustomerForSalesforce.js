@@ -8,7 +8,7 @@ import connectDB from '../config/database.js';
 dotenv.config();
 
 export async function handleCustomerForSalesforce(customer) {
-    storeLog("Execute handleCustomerForSalesforce function");
+    storeLog("Execute handleCustomerForSalesforce function.");
     await syncCustomerToSalesforce(customer, 'create');
 }
 
