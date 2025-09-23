@@ -40,6 +40,76 @@ export const update = async (req, res) => {
     try{
         const { shopify_cus_id, lead_status } = req.body;
         
+        const customer = await Customers.findOne({'shopify_cus_id':shopify_cus_id});
+        if(!customer) {
+            return errorResponse(res, process.env.NO_RECORD, 404);
+        }
+        
+        await Customers.updateOne(
+            { shopify_cus_id: shopify_cus_id },
+            {
+                $set: {
+                    lead_status: lead_status
+                },
+            }
+        );
+
+        // Engagement Checklist Step
+        if(req.body?.engagement_type || req.body?.engagement_note){            
+            if(req.body.engagement_type){
+                setData.engagement_type = req.body.engagement_type;
+            }
+            
+            if(req.body.engagement_note){
+                setData.engagement_note = req.body.engagement_note;
+            }
+
+            await Customers.updateOne(
+                { shopify_cus_id },
+                { $set: setData },
+                { upsert: true }
+            );
+        }
+        
+        // Sales & Admin Diary Step
+        if(req.body?.diary){
+            await Diary.create({
+                sender_id: req.body.loggedin_user_id,
+                customer_id: customer._id,
+                message: req.body.diary,
+            });
+        }
+
+        // Event Planning Step 
+        if(req.body?.title){
+            await Events.create({
+                user_id    : req.body.loggedin_user_id,
+                customer_id: customer._id,
+                title      : req.body.title,
+                date       : req.body.date,
+                url        : req.body.url || undefined,
+                location   : req.body.location || undefined,
+                description: req.body.description || undefined,
+            });
+        }
+
+        return successResponse(res, response.data.id, "Lead Status Updated Successfully");
+    }catch(error){
+        // console.log(error?.response?.data || error.message);
+        const errorMessage = (error?.response?.data[0]?.errorCode == 'DUPLICATES_DETECTED')?'Failes to create lead, errorCode: DUPLICATES_DETECTED':'Failed to create lead'
+
+        return res.status(500).json({
+            success: false,
+            message: errorMessage,
+            error: error?.response?.data || error.message
+        });
+    }
+}
+
+export const _update = async (req, res) => {
+    try{
+        const { shopify_cus_id, lead_status } = req.body;
+        
         const settings = await Settings.findOne();
         const { sf_access_token:token, sf_instance_url:url } = settings;
 
