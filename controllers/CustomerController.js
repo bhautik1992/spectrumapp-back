@@ -93,7 +93,7 @@ export const update = async (req, res) => {
             });
         }
 
-        return successResponse(res, response.data.id, "Lead Status Updated Successfully");
+        return successResponse(res, {}, "Lead Status Updated Successfully");
     }catch(error){
         // console.log(error?.response?.data || error.message);
         const errorMessage = (error?.response?.data[0]?.errorCode == 'DUPLICATES_DETECTED')?'Failes to create lead, errorCode: DUPLICATES_DETECTED':'Failed to create lead'
