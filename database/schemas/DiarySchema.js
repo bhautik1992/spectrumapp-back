@@ -16,10 +16,10 @@ const schema = new mongoose.Schema({
         type: String, 
         trim: true
     },
-    response_body: {
-        type: String,
-        required: true
-    },
+    // response_body: {
+    //     type: String,
+    //     required: true
+    // },
     deletedAt: {type: Date}
 },{
     timestamps: true
