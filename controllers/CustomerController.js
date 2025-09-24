@@ -583,89 +583,97 @@ export const segmentRecords = async (req, res) => {
     }
 };
 
+// First Call: GET /api/customer/list?batchSize=250
+// Second Call: GET /api/customer/list?batchSize=250&pageInfo=<value from previous response>
+// Repeat until response returns "nextPageInfo": null.
 export const listCustomers = async (req, res) => {
     try {
-        const batchNumber = parseInt(req.query.batchNumber);
-        const batchSize   = parseInt(req.query.batchSize);
-        
+        const batchSize = parseInt(req.query.batchSize) || 250;
+        const pageInfo = req.query.pageInfo || null;
+
         if (batchSize < 1 || batchSize > 250) {
-            return errorResponse(res,'Batch size must be between 1 and 250',400);
+            return errorResponse(res, "Batch size must be between 1 and 250", 400);
         }
 
         const settings = await Settings.findOne();
-        const { sp_app_url, admin_api_access_token } = settings;
-
-        let allFilteredCustomers = [];
-        let pageInfo             = null;
-        let hasNextPage          = true;
-
-        while (hasNextPage) {
-            let url = `${sp_app_url}/admin/api/2025-07/customers.json?limit=250`;
-            if (pageInfo) url += `&page_info=${pageInfo}`;
-
-            const response = await axios.get(url, {
-                headers: {
-                    "X-Shopify-Access-Token": admin_api_access_token,
-                    "Content-Type": "application/json",
-                },
-            });
-
-            let customers = response.data?.customers || [];
-            for (const cus of customers) {
-                if (cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")) {
-                    
-                    await Customers.create({
-                        shopify_cus_id: cus.id,
-                        shopify_request_body: JSON.stringify(cus),
-                        // salesforce_lead_id: response.data.id,
-                        // salesforce_lead_response_body: JSON.stringify(response.data),
-                        lead_first_name: cus.first_name,
-                        lead_last_name: cus.last_name,
-                        lead_email: cus.email,
-                        lead_company: cus.default_address?.company || "Individual",
-                        lead_phone: cus.phone || "",
-                        lead_description: `Shopify ID: ${cus.id}`,
-                        lead_source: 7 //"Migrate Customer"
-                    });
-
-                    allFilteredCustomers.push(cus);
-                }
-            }
-
-            // customers = customers.filter(cus =>
-            //     cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")
-            // ); 
-            // allFilteredCustomers.push(...customers);
-
-            // Check if next page exists
-            const linkHeader = response.headers["link"];
-            if (linkHeader && linkHeader.includes('rel="next"')) {
-                const match = linkHeader.match(/page_info=([^&>]+)/);
-                pageInfo = match ? match[1] : null;
-            } else {
-                hasNextPage = false;
-            }
-
-            // Stop fetching if we already collected enough for our requested batch
-            if (allFilteredCustomers.length >= batchNumber * batchSize) break;
+        if (!settings) {
+            return errorResponse(res, "Settings not found", 500);
         }
 
-        // Slice the batch from the full filtered list
-        const startIndex = (batchNumber - 1) * batchSize;
-        const endIndex = startIndex + batchSize;
-        const batchCustomers = allFilteredCustomers.slice(startIndex, endIndex);
+        const { sp_app_url, admin_api_access_token } = settings;
 
-        return successResponse(res, {
-            batchNumber,
-            batchSize,
-            fetchedCount: batchCustomers.length,
-            customers: batchCustomers
-        },'Customers fetched and saved successfully');
+        // Build Shopify API URL
+        let url = `${sp_app_url}/admin/api/2025-07/customers.json?limit=${batchSize}`;
+        if (pageInfo) url += `&page_info=${pageInfo}`;
+
+        const response = await axios.get(url, {
+            headers: {
+                "X-Shopify-Access-Token": admin_api_access_token,
+                "Content-Type": "application/json",
+            },
+        });
+
+        const customers = response.data?.customers || [];
+        let migratedCustomers = [];
+
+        let totalMigrated = 0, totalInserted = 0, totalUpdated = 0;
+
+        for (const cus of customers) {
+            if (cus.tags?.split(",").map(t => t.trim()).includes("New Trade Account Registration")) {
+                const result = await Customers.findOneAndUpdate(
+                    { shopify_cus_id: cus.id },
+                    {
+                        $set: {
+                            shopify_request_body: JSON.stringify(cus),
+                            lead_first_name: cus.first_name,
+                            lead_last_name: cus.last_name,
+                            lead_email: cus.email,
+                            lead_company: cus.default_address?.company || "Individual",
+                            lead_phone: cus.phone || "",
+                            lead_description: `Shopify ID: ${cus.id}`,
+                            lead_source: 7,
+                        },
+                    },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                );
+
+                if (result.wasNew) {
+                    totalInserted++;
+                } else {
+                    totalUpdated++;
+                }
+
+                migratedCustomers.push(cus);
+                totalMigrated++;
+            }
+        }
+
+        // Parse Shopify link header for next page
+        let nextPageInfo = null;
+        const linkHeader = response.headers["link"];
+        if (linkHeader) {
+            const nextMatch = linkHeader.match(/<[^>]+page_info=([^&>]+)[^>]*>; rel="next"/);
+            if (nextMatch) {
+                nextPageInfo = nextMatch[1];
+            }
+        }
+
+        return successResponse(
+            res,
+            {
+                totalMigrated,
+                totalInserted,
+                totalUpdated,
+                nextPageInfo, // 👈 frontend should pass this in next API call
+                customers: migratedCustomers,
+            },
+            "Customers batch processed successfully"
+        );
     } catch (error) {
-        // console.log(error.response?.data || error.message);
-        // return errorResponse(res, process.env.ERROR_MSG, 500);
+        console.error("Error in listCustomers:", error.response?.data || error.message);
         return errorResponse(res, error.response?.data || error.message, 500);
-    }  
+    }
 };
+
 
 
