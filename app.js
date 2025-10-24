@@ -30,10 +30,10 @@ app.use(express.json());
 app.use(process.env.API_PREFIX, router); 
 
 // Error handling middleware (optional)
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ message: 'An error occurred', error: err.message });
-});
+// app.use((err, req, res, next) => {
+//     console.error(err.stack);
+//     res.status(500).json({ message: 'An error occurred', error: err.message });
+// });
 
 export default app;
 
