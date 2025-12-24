@@ -512,16 +512,143 @@ export const segmentList = async (req, res) => {
     }
 }
 
+// const getSegmentQuery = async ({ id, url, token }) => {
+//     const query = {
+//         query: `query {
+//             segment(id: "${id}") {
+//                 id
+//                 name
+//                 query
+//             }
+//         }`
+//     };
+
+//     const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,
+//         {
+//             headers: {
+//                 'X-Shopify-Access-Token': token,
+//                 'Content-Type': 'application/json'
+//             }
+//         }
+//     );
+
+//     const segment = response.data?.data?.segment;
+//     if (!segment) {
+//         return errorResponse(res, 'Segment not found', 404);
+//     }
+
+//     return segment.query;
+// }
+
+// export const segmentRecords = async (req, res) => {
+//     try {
+//         const { id, perPage, before, after, isNext, fromDate, toDate } = req.query;
+//         let cursorClause = `first: ${perPage}`; 
+        
+//         if(isNext !== undefined){
+//             if(isNext === 'true'){
+//                 cursorClause = ` first: ${perPage}, after: "${after}"`;
+//             }else{
+//                 cursorClause = ` last: ${perPage}, before: "${before}"`;
+//             }
+//         }
+
+//         const settings = await Settings.findOne();
+//         const { sp_app_url: url, admin_api_access_token: token } = settings;
+  
+//         const segmentQuery = await getSegmentQuery({id, url, token});
+//         console.log(segmentQuery);
+        
+//         let customerQuery = '';
+//         const match = segmentQuery.match(
+//             /customer_tags\s+CONTAINS\s+'([^']+)'/i
+//         );
+
+//         if (match) {
+//             customerQuery = `tag:'${match[1]}'`;
+//         } else {
+//             return errorResponse(res, 'Segment is not tag based', 400);
+//         }
+        
+//         if(fromDate != '' && toDate != ''){
+//             customerQuery = `${customerQuery} AND customer_date:>='${fromDate}' AND customer_date:<='${toDate}'`;
+//         }
+
+//         const query = {
+//             query: `
+//                 query {
+//                     customers(
+//                         ${cursorClause},
+//                         query: "${customerQuery.replace(/"/g, '\\"')}",
+//                         sortKey: UPDATED_AT,
+//                         reverse: true
+//                     ) {
+//                         edges {
+//                             cursor
+//                             node {
+//                                 id
+//                                 displayName
+//                                 defaultEmailAddress{
+//                                     emailAddress
+//                                     marketingState
+//                                 }
+//                                 defaultAddress {
+//                                     address1
+//                                     city
+//                                     province
+//                                     country
+//                                     zip
+//                                 }
+//                                 amountSpent{
+//                                     amount
+//                                     currencyCode
+//                                 }
+//                                 defaultPhoneNumber{
+//                                     phoneNumber
+//                                 }
+//                                 numberOfOrders
+//                                 createdAt
+//                                 updatedAt
+//                             }
+//                         }
+//                         pageInfo {
+//                             hasNextPage
+//                             startCursor
+//                             endCursor
+//                             hasPreviousPage
+//                         }
+//                     }
+//                 }
+//             `
+//         };
+          
+//         const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,{
+//             headers: {
+//                 'X-Shopify-Access-Token': token,
+//                 'Content-Type': 'application/json'
+//             }
+//         });
+
+//         const members = response.data?.data?.customers?.edges || [];
+//         const pageInfo = response.data?.data?.customers?.pageInfo || {};
+
+//         return successResponse(res, { members, pageInfo, totalCount:500 });
+//     } catch (error) {
+//         // console.log( error.response?.data || error.message);
+//         return errorResponse(res, process.env.ERROR_MSG, 500);
+//     }
+// };
+
 export const segmentRecords = async (req, res) => {
     try {
         const { id, perPage, before, after, isNext } = req.query;
-        let cursorClause = `first: ${perPage}`; 
-        
+
+        let cursorClause = `first: ${perPage}, reverse: true`;
         if(isNext !== undefined){
             if(isNext === 'true'){
-                cursorClause = ` first: ${perPage}, after: "${after}"`;
+                cursorClause = ` first: ${perPage}, after: "${after}", reverse: true`;
             }else{
-                cursorClause = ` last: ${perPage}, before: "${before}"`;
+                cursorClause = ` last: ${perPage}, before: "${before}", reverse: true`;
             }
         }
 
@@ -562,6 +689,7 @@ export const segmentRecords = async (req, res) => {
                         endCursor
                         hasPreviousPage
                     }
+                    totalCount
                 }
             }`
         };
@@ -575,8 +703,9 @@ export const segmentRecords = async (req, res) => {
   
         const members = response.data?.data?.customerSegmentMembers?.edges || [];
         const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
+        const totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
 
-        return successResponse(res, {members, pageInfo});
+        return successResponse(res, {members, pageInfo, totalCount});
     } catch (error) {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
