@@ -4,6 +4,32 @@ import axios from 'axios';
 import { storeLog } from "../helpers/Common.js";
 import { lowStockThreshold } from '../config/constants.js';
 
+function getCurrentQuarter() {
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const year  = today.getFullYear();
+
+    let quarter;
+
+    if (month >= 1 && month <= 3) quarter = 1;
+    else if (month >= 4 && month <= 6) quarter = 2;
+    else if (month >= 7 && month <= 9) quarter = 3;
+    else quarter = 4;
+
+    return { year, quarter };
+}
+
+function getQuarterDates(year, quarter) {
+    const quarters = {
+        1: [`${year}-01-01`, `${year}-03-31`],
+        2: [`${year}-04-01`, `${year}-06-30`],
+        3: [`${year}-07-01`, `${year}-09-30`],
+        4: [`${year}-10-01`, `${year}-12-31`],
+    };
+    
+    return quarters[quarter];
+}
+
 export const index = async (req, res) => {
     try{
         const { perPage, before, after, isNext, filter, picker } = req.query;
@@ -87,6 +113,84 @@ export const index = async (req, res) => {
             const total = response.data?.data?.productsCount?.count || 0;
 
             return successResponse(res, {products, pageInfo, total});   
+        }else if (filter == 4) {
+            const { year, quarter } = getCurrentQuarter();
+
+            const [startCurrent, endCurrent] = getQuarterDates(year, quarter);
+            const [startPrev, endPrev]       = getQuarterDates(year - 1, quarter);
+
+            const salesCurrent = await fetchSalesMap(url, token, startCurrent, endCurrent);
+            const salesPrev    = await fetchSalesMap(url, token, startPrev, endPrev);
+
+            const comparison = [];
+            const allIds = new Set([...Object.keys(salesCurrent), ...Object.keys(salesPrev)]);
+
+            allIds.forEach(id => {
+                comparison.push({
+                    id,
+                    title: salesCurrent[id]?.title || salesPrev[id]?.title || "",
+                    currentQty: salesCurrent[id]?.quantity || 0,
+                    prevQty: salesPrev[id]?.quantity || 0,
+                    difference:
+                        (salesCurrent[id]?.quantity || 0) -
+                        (salesPrev[id]?.quantity || 0),
+                    percentage:
+                        (salesPrev[id]?.quantity || 0) === 0
+                            ? null
+                            : (
+                                ((salesCurrent[id]?.quantity || 0) -
+                                (salesPrev[id]?.quantity || 0)) /
+                                (salesPrev[id]?.quantity || 0)
+                            ) * 100,
+                    trend:
+                        (salesCurrent[id]?.quantity || 0) >
+                        (salesPrev[id]?.quantity || 0)
+                            ? "up"
+                            : (salesCurrent[id]?.quantity || 0) <
+                            (salesPrev[id]?.quantity || 0)
+                            ? "down"
+                            : "same"
+                });
+            });
+
+            comparison.sort((a, b) => b.currentQty - a.currentQty);
+
+            const decodeCursor = cursor => {
+                try { return JSON.parse(Buffer.from(cursor, "base64").toString("utf8")); }
+                catch { return null; }
+            };
+
+            let startIndex = 0;
+            const perPageInt = parseInt(perPage);
+
+            if (after && isNext === "true") {
+                const decoded = decodeCursor(after);
+                if (decoded) {
+                    const idx = comparison.findIndex(i => i.id === decoded.last_id);
+                    startIndex = idx >= 0 ? idx + 1 : 0;
+                }
+            } else if (before && isNext === "false") {
+                const decoded = decodeCursor(before);
+                if (decoded) {
+                    const idx = comparison.findIndex(i => i.id === decoded.last_id);
+                    startIndex = idx - perPageInt >= 0 ? idx - perPageInt : 0;
+                }
+            }
+
+            const endIndex = startIndex + perPageInt;
+            const paginated = comparison.slice(startIndex, endIndex);
+
+            const encodeCursor = item =>
+                Buffer.from(JSON.stringify({ last_id: item.id })).toString("base64");
+
+            const pageInfo = {
+                hasNextPage: endIndex < comparison.length,
+                hasPreviousPage: startIndex > 0,
+                startCursor: paginated[0] ? encodeCursor(paginated[0]) : null,
+                endCursor: paginated[paginated.length - 1] ? encodeCursor(paginated[paginated.length - 1]) : null
+            };
+
+            return successResponse(res, {products: paginated, pageInfo, total: comparison.length}); 
         }else{
             let startDate    = new Date(picker[0]).toISOString().split("T")[0];
             let endDate      = new Date(picker[1]).toISOString().split("T")[0];
@@ -279,4 +383,74 @@ export const index = async (req, res) => {
     }
 }
 
+async function fetchSalesMap(url, token, startDate, endDate) {
+    const dateFilter = `created_at:>=${startDate} AND created_at:<=${endDate}`;
+
+    const salesMap = {};
+    let afterCursor = null;
+    let hasNext = true;
+
+    while (hasNext) {
+        const cursorClause = afterCursor 
+            ? `first: 250, after: "${afterCursor}"`
+            : `first: 250`;
+
+        const query = {
+            query: `query {
+                orders(${cursorClause}, query: "${dateFilter}") {
+                    edges {
+                        node {
+                            id
+                            createdAt
+                            lineItems(first: 250) {
+                                edges {
+                                    node {
+                                        quantity
+                                        product { id title }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }`
+        };
+
+        const resp = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, {
+            headers: {
+                'X-Shopify-Access-Token': token,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const edges = resp.data?.data?.orders?.edges || [];
+
+        edges.forEach(order => {
+            order.node.lineItems.edges.forEach(item => {
+                const productId = item.node.product?.id;
+                if (!productId) return;
+
+                if (!salesMap[productId]) {
+                    salesMap[productId] = {
+                        id: productId,
+                        title: item.node.product.title,
+                        quantity: 0
+                    };
+                }
+
+                salesMap[productId].quantity += item.node.quantity;
+            });
+        });
+
+        const pageInfo = resp.data?.data?.orders?.pageInfo;
+        hasNext = pageInfo?.hasNextPage;
+        afterCursor = pageInfo?.endCursor;
+    }
+
+    return salesMap;
+}
 
