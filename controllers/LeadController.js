@@ -85,7 +85,68 @@ export const index = async (req, res) => {
         const customers = result[0].customers;
         const total = result[0].totalCount[0]?.count || 0;
 
-        return successResponse(res, { customers, total });
+        // Fetch real-time Shopify data for each customer
+        const settings = await Settings.findOne();
+        const { sp_app_url, admin_api_access_token } = settings;
+
+        const enrichedCustomers = await Promise.all(
+            customers.map(async (customer) => {
+                try {
+                    // Fetch live customer data from Shopify
+                    const shopifyResponse = await axios.get(
+                        `${sp_app_url}/admin/api/2025-07/customers/${customer.shopify_cus_id}.json`,
+                        {
+                            headers: {
+                                'X-Shopify-Access-Token': admin_api_access_token,
+                                'Content-Type': 'application/json',
+                            }
+                        }
+                    );
+
+                    const shopifyData = shopifyResponse.data.customer;
+
+                    // Fetch last order date if last_order_id exists
+                    let lastOrderDate = null;
+                    if (shopifyData.last_order_id) {
+                        try {
+                            const orderResponse = await axios.get(
+                                `${sp_app_url}/admin/api/2025-07/orders/${shopifyData.last_order_id}.json`,
+                                {
+                                    headers: {
+                                        'X-Shopify-Access-Token': admin_api_access_token,
+                                        'Content-Type': 'application/json',
+                                    }
+                                }
+                            );
+                            lastOrderDate = orderResponse.data.order.created_at;
+                        } catch (orderError) {
+                            storeLog(`Error fetching order ${shopifyData.last_order_id}: ${orderError.message}`);
+                        }
+                    }
+
+                    // Append real-time Shopify data
+                    return {
+                        ...customer,
+                        customer_added_date: shopifyData.created_at,
+                        amount_spent: shopifyData.total_spent,
+                        orders_count: shopifyData.orders_count,
+                        last_order_date: lastOrderDate
+                    };
+                } catch (error) {
+                    storeLog(`Error fetching Shopify data for customer ${customer.shopify_cus_id}: ${error.message}`);
+                    // Return customer without real-time data if API call fails
+                    return {
+                        ...customer,
+                        customer_added_date: null,
+                        amount_spent: '0.00',
+                        orders_count: 0,
+                        last_order_date: null
+                    };
+                }
+            })
+        );
+
+        return successResponse(res, { customers: enrichedCustomers, total });
     } catch (error) {
         console.log(error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);

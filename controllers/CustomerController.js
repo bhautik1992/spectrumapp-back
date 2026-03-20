@@ -29,7 +29,57 @@ export const edit = async (req, res) => {
             options: { sort: { date: 1 } }
         });
 
-        return successResponse(res, customer);
+        // Fetch real-time Shopify data
+        const settings = await Settings.findOne();
+        const { sp_app_url, admin_api_access_token } = settings;
+
+        try {
+            const shopifyResponse = await axios.get(
+                `${sp_app_url}/admin/api/2025-07/customers/${customer.shopify_cus_id}.json`,
+                {
+                    headers: {
+                        'X-Shopify-Access-Token': admin_api_access_token,
+                        'Content-Type': 'application/json',
+                    }
+                }
+            );
+
+            const shopifyData = shopifyResponse.data.customer;
+
+            // Fetch last order date if last_order_id exists
+            let lastOrderDate = null;
+            if (shopifyData.last_order_id) {
+                try {
+                    const orderResponse = await axios.get(
+                        `${sp_app_url}/admin/api/2025-07/orders/${shopifyData.last_order_id}.json`,
+                        {
+                            headers: {
+                                'X-Shopify-Access-Token': admin_api_access_token,
+                                'Content-Type': 'application/json',
+                            }
+                        }
+                    );
+                    lastOrderDate = orderResponse.data.order.created_at;
+                } catch (orderError) {
+                    storeLog(`Error fetching order ${shopifyData.last_order_id}: ${orderError.message}`);
+                }
+            }
+
+            // Enrich customer data with Shopify info
+            const enrichedCustomer = {
+                ...customer.toObject(),
+                customer_added_date: shopifyData.created_at,
+                amount_spent: shopifyData.total_spent,
+                orders_count: shopifyData.orders_count,
+                last_order_date: lastOrderDate
+            };
+
+            return successResponse(res, enrichedCustomer);
+        } catch (shopifyError) {
+            storeLog(`Error fetching Shopify data for customer ${customer.shopify_cus_id}: ${shopifyError.message}`);
+            // Return customer without real-time data if API call fails
+            return successResponse(res, customer);
+        }
     } catch (error) {
         // console.log(error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
