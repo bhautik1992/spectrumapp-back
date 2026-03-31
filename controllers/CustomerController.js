@@ -765,7 +765,8 @@ export const segmentRecords = async (req, res) => {
 // First Call: GET /api/customer/list?batchSize=250
 // Second Call: GET /api/customer/list?batchSize=250&pageInfo=<value from previous response>
 // Repeat until response returns "nextPageInfo": null.
-export const listCustomers = async (req, res) => {
+// Manage "New Trade Account Registration" tag customers when they are created or updated in Shopify
+export const listCustomers1 = async (req, res) => {
     try {
         const batchSize = parseInt(req.query.batchSize) || 250;
         const pageInfo = req.query.pageInfo || null;
@@ -854,5 +855,98 @@ export const listCustomers = async (req, res) => {
     }
 };
 
+// Manage "Trade Account" tag customers when they are created or updated in Shopify
+export const listCustomers = async (req, res) => {
+    try {
+        const batchSize = 250; // Shopify max
+        let pageInfo = req.query.pageInfo || null;
+
+        const settings = await Settings.findOne();
+        if (!settings) {
+            return errorResponse(res, "Settings not found", 500);
+        }
+
+        const { sp_app_url, admin_api_access_token } = settings;
+
+        const headers = {
+            "X-Shopify-Access-Token": admin_api_access_token,
+            "Content-Type": "application/json",
+        };
+
+        let allMatchedCustomers = [];
+        let nextPageInfo = pageInfo || null;
+        let hasNextPage = true;
+
+        let totalInserted = 0;
+        let totalUpdated  = 0;
+
+        while (hasNextPage) {
+            let url = `${sp_app_url}/admin/api/2025-07/customers.json?limit=${batchSize}`;
+            if (nextPageInfo) {
+                url += `&page_info=${nextPageInfo}`;
+            }
+
+            const response  = await axios.get(url, { headers });
+            const customers = response.data?.customers || [];
+
+            const filtered = customers.filter(cus => {
+                const tagsArray = (cus.tags || "")
+                    .split(",")
+                    .map(tag => tag.trim().toLowerCase());
+
+                return tagsArray.includes("trade account");
+            });
+
+            for (const cus of filtered) {
+                const result = await Customers.findOneAndUpdate(
+                    { shopify_cus_id: cus.id },
+                    {
+                        $set: {
+                            shopify_request_body: JSON.stringify(cus),
+                            lead_first_name: cus.first_name,
+                            lead_last_name: cus.last_name,
+                            lead_email: cus.email,
+                            lead_company: cus.default_address?.company || "Individual",
+                            lead_phone: cus.phone || "",
+                            lead_description: `Shopify ID: ${cus.id}`,
+                            lead_source: 7,
+                        },
+                    },
+                    { upsert: true, new: true, rawResult: true }
+                );
+
+                if (result.lastErrorObject?.upserted) {
+                    totalInserted++;
+                } else {
+                    totalUpdated++;
+                }
+            }
+
+            allMatchedCustomers.push(...filtered);
+            const linkHeader = response.headers["link"];
+
+            if (linkHeader) {
+                const nextMatch = linkHeader.match(/<[^>]+page_info=([^&>]+)[^>]*>; rel="next"/);
+                nextPageInfo = nextMatch ? nextMatch[1] : null;
+                hasNextPage = !!nextPageInfo;
+            } else {
+                hasNextPage = false;
+            }
+        }
+
+        return successResponse(res,
+            {
+                totalMigrated: allMatchedCustomers.length,
+                totalInserted,
+                totalUpdated,
+                customers: allMatchedCustomers,
+            },
+            "All Trade Account customers fetched successfully"
+        );
+    } catch (error) {
+        console.error("Error in listCustomers:", error.response?.data || error.message);
+        return errorResponse(res, error.response?.data || error.message, 500);
+    }
+};
 
 
