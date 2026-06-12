@@ -216,9 +216,13 @@ export const index = async (req, res) => {
                                         edges {
                                             node {
                                                 quantity
-                                                product { 
-                                                    id 
-                                                    title 
+                                                product {
+                                                    id
+                                                    title
+                                                }
+                                                variant {
+                                                    id
+                                                    title
                                                 }
                                             }
                                         }
@@ -248,17 +252,34 @@ export const index = async (req, res) => {
                 edges.forEach(order => {
                     order.node.lineItems.edges.forEach(item => {
                         const productId = item.node.product?.id;
+
                         if (!productId) return;
 
                         if (!salesMap[productId]) {
-                            salesMap[productId] = { 
-                                id: productId, 
-                                title: item.node.product.title, 
-                                quantity: 0 
+                            salesMap[productId] = {
+                                id: productId,
+                                title: item.node.product.title,
+                                quantity: 0,
+                                variants: {}
                             };
                         }
 
                         salesMap[productId].quantity += item.node.quantity;
+
+                        const variantId = item.node.variant?.id;
+                        const variantTitle = item.node.variant?.title;
+
+                        if (variantId) {
+                            if (!salesMap[productId].variants[variantId]) {
+                                salesMap[productId].variants[variantId] = {
+                                    id: variantId,
+                                    title: variantTitle,
+                                    quantity: 0
+                                };
+                            }
+
+                            salesMap[productId].variants[variantId].quantity += item.node.quantity;
+                        }
                     });
                 });
 
@@ -370,7 +391,10 @@ export const index = async (req, res) => {
             const products = allProductDetails.map(p => ({
                 node: {
                     ...p,
-                    qty: salesMap[p.id]?.quantity || 0
+                    qty: salesMap[p.id]?.quantity || 0,
+                    soldVariants: Object.values(
+                        salesMap[p.id]?.variants || {}
+                    )
                 }
             }));
 
