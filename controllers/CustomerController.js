@@ -26,7 +26,11 @@ export const edit = async (req, res) => {
         .populate({
             path: 'events',
             select: 'title date url location description',
-            options: { sort: { date: 1 } }
+            options: { sort: { date: 1 } },
+            populate: {
+                path: 'user_id',
+                select: 'full_name color_code'
+            }
         });
 
         // Fetch real-time Shopify data
