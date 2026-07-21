@@ -1,6 +1,6 @@
 import express from 'express';
 import { edit, update, segmentList, segmentRecords, listCustomers } from '../../controllers/CustomerController.js';
-import { listCustomersExport } from '../../controllers/CustomerExportController.js';
+import { listCustomersExport, listSegmentMembersExport } from '../../controllers/CustomerExportController.js';
 
 import { protectRoute } from '../../middleware/Authenticate.js';
 // import { salesforceAuth } from '../../middleware/salesforceAuth.js';
@@ -11,6 +11,7 @@ router.route('/edit/:id').get(protectRoute, edit);
 router.route('/update').post(protectRoute, update);
 router.route('/segment/list').get(protectRoute, segmentList);
 router.route('/segment/records').get(protectRoute, segmentRecords);
+router.route('/segment/export').get(protectRoute, listSegmentMembersExport);
 router.route('/list').get(protectRoute, listCustomers);
 router.route('/export').get(protectRoute, listCustomersExport);
 

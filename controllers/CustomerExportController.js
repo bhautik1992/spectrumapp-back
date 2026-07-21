@@ -14,6 +14,23 @@ const csvEscape = (value) => {
   return needsQuotes ? `"${escaped}"` : escaped;
 };
 
+const UTF8_BOM = '\uFEFF';
+
+const currencySymbolMap = {
+  GBP: '£',
+  USD: '$',
+  EUR: '€',
+  INR: '₹',
+};
+
+const sanitizeFileName = (value) => {
+  if (!value) return 'segment';
+  return String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9-_ ]/g, '')
+    .replace(/\s+/g, '_') || 'segment';
+};
+
 const sleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
@@ -40,12 +57,12 @@ const getRetryDelayMs = (error, attempt) => {
   return 600 * attempt;
 };
 
-const requestWithRetry = async (url, config, maxAttempts = 3) => {
+const requestWithRetry = async (config, maxAttempts = 3) => {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await axios.get(url, config);
+      return await axios(config);
     } catch (error) {
       lastError = error;
       const status = error?.response?.status;
@@ -156,8 +173,11 @@ export const listCustomersExport = async (req, res) => {
     for (const customerChunk of customerIdChunks) {
       try {
         const customersResponse = await requestWithRetry(
-          `${sp_app_url}/admin/api/2025-07/customers.json?limit=250&fields=id,created_at,total_spent,orders_count,last_order_id&ids=${customerChunk.join(',')}`,
-          { headers },
+          {
+            method: 'get',
+            url: `${sp_app_url}/admin/api/2025-07/customers.json?limit=250&fields=id,created_at,total_spent,orders_count,last_order_id&ids=${customerChunk.join(',')}`,
+            headers,
+          },
           3
         );
 
@@ -203,8 +223,11 @@ export const listCustomersExport = async (req, res) => {
     for (const orderChunk of orderIdChunks) {
       try {
         const ordersResponse = await requestWithRetry(
-          `${sp_app_url}/admin/api/2025-07/orders.json?status=any&limit=250&fields=id,created_at&ids=${orderChunk.join(',')}`,
-          { headers },
+          {
+            method: 'get',
+            url: `${sp_app_url}/admin/api/2025-07/orders.json?status=any&limit=250&fields=id,created_at&ids=${orderChunk.join(',')}`,
+            headers,
+          },
           3
         );
 
@@ -285,13 +308,145 @@ export const listCustomersExport = async (req, res) => {
       ...rows.map((r) => r.map(csvEscape).join(',')),
     ];
 
-    const csv = csvLines.join('\n');
+    const csv = `${UTF8_BOM}${csvLines.join('\n')}`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="customers.csv"`);
     return res.status(200).send(csv);
   } catch (error) {
     return errorResponse(res, process.env.ERROR_MSG || 'CSV export failed', 500);
+  }
+};
+
+export const listSegmentMembersExport = async (req, res) => {
+  try {
+    const { id, segmentName = 'segment' } = req.query;
+
+    if (!id) {
+      return errorResponse(res, 'Segment id is required', 400);
+    }
+
+    const settings = await Settings.findOne();
+    if (!settings) return errorResponse(res, 'Settings not found', 500);
+
+    const { sp_app_url: url, admin_api_access_token: token } = settings;
+
+    const headers = {
+      'X-Shopify-Access-Token': token,
+      'Content-Type': 'application/json',
+    };
+
+    const csvHeaders = [
+      'Customer Name',
+      'Phone',
+      'Email',
+      'Email Subscription',
+      'Location',
+      'Orders',
+      'Amount Spent',
+    ];
+
+    const safeSegmentName = sanitizeFileName(segmentName);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="customer_insights_${safeSegmentName}.csv"`);
+    res.write(`${UTF8_BOM}${csvHeaders.map(csvEscape).join(',')}\n`);
+
+    let hasNextPage = true;
+    let afterCursor = null;
+    const pageSize = 250;
+
+    while (hasNextPage) {
+      const cursorClause = afterCursor
+        ? `first: ${pageSize}, after: \"${afterCursor}\", reverse: true`
+        : `first: ${pageSize}, reverse: true`;
+
+      const query = {
+        query: `query {
+          customerSegmentMembers(segmentId: "${id}", ${cursorClause}) {
+            edges {
+              node {
+                id
+                displayName
+                defaultEmailAddress {
+                  emailAddress
+                  marketingState
+                }
+                defaultAddress {
+                  city
+                  country
+                }
+                amountSpent {
+                  amount
+                  currencyCode
+                }
+                defaultPhoneNumber {
+                  phoneNumber
+                }
+                numberOfOrders
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }`,
+      };
+
+      const response = await requestWithRetry(
+        {
+          method: 'post',
+          url: `${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+          headers,
+          data: query,
+        },
+        3
+      );
+
+      const members = response.data?.data?.customerSegmentMembers?.edges || [];
+      const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
+
+      for (const edge of members) {
+        const node = edge?.node || {};
+        const city = node?.defaultAddress?.city || '';
+        const country = node?.defaultAddress?.country || '';
+        const location = [city, country].filter(Boolean).join(', ');
+
+        const amount = node?.amountSpent?.amount || '';
+        const currencyCode = node?.amountSpent?.currencyCode || '';
+        const currencyPrefix = currencySymbolMap[currencyCode] || currencyCode;
+        const amountSpent = amount && currencyCode ? `${currencyPrefix}${amount}` : '';
+
+        const phoneValue = node?.defaultPhoneNumber?.phoneNumber || '';
+        const phoneCsv = phoneValue ? `\t${phoneValue}` : '';
+
+        const row = [
+          node?.displayName || '',
+          phoneCsv,
+          node?.defaultEmailAddress?.emailAddress || '',
+          node?.defaultEmailAddress?.marketingState || '',
+          location,
+          node?.numberOfOrders ?? 0,
+          amountSpent,
+        ];
+
+        res.write(`${row.map(csvEscape).join(',')}\n`);
+      }
+
+      hasNextPage = !!pageInfo?.hasNextPage;
+      afterCursor = pageInfo?.endCursor || null;
+    }
+
+    return res.end();
+  } catch (error) {
+    storeLog(`Segment export failed: ${error.message}`);
+
+    if (!res.headersSent) {
+      return errorResponse(res, process.env.ERROR_MSG || 'CSV export failed', 500);
+    }
+
+    return res.end();
   }
 };
 
