@@ -4,6 +4,88 @@ import axios from 'axios';
 import { storeLog } from "../helpers/Common.js";
 import { lowStockThreshold } from '../config/constants.js';
 
+const UTF8_BOM = '\uFEFF';
+
+const csvEscape = (value) => {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    const needsQuotes = /[",\n\r]/.test(str);
+    const escaped = str.replace(/"/g, '""');
+    return needsQuotes ? `"${escaped}"` : escaped;
+};
+
+const parsePickerRange = (picker) => {
+    if (!picker) return null;
+
+    if (Array.isArray(picker)) {
+        return picker;
+    }
+
+    if (typeof picker === 'string') {
+        try {
+            const parsed = JSON.parse(picker);
+            if (Array.isArray(parsed)) return parsed;
+        } catch {
+            const splitByComma = picker.split(',').map((d) => d.trim()).filter(Boolean);
+            if (splitByComma.length >= 2) return splitByComma;
+        }
+    }
+
+    return null;
+};
+
+const formatInventoryText = (node, filter) => {
+    if (!node?.tracksInventory) {
+        return 'Inventory not tracked';
+    }
+
+    if (String(filter) === '1') {
+        const variants = node?.variants?.edges || [];
+
+        if (node?.hasOnlyDefaultVariant) {
+            const qty = variants[0]?.node?.inventoryQuantity ?? 0;
+            return `${qty} in stock`;
+        }
+
+        const lowStockVariants = variants.filter(
+            (variant) => (variant.node?.inventoryQuantity ?? 0) <= lowStockThreshold
+        );
+
+        if (!lowStockVariants.length) return '';
+
+        return lowStockVariants
+            .map((variant) => `${variant.node?.title || ''} - ${variant.node?.inventoryQuantity ?? 0}`)
+            .join(' | ');
+    }
+
+    if (['2', '3'].includes(String(filter))) {
+        const variants = node?.variants?.edges || [];
+        if (!variants.length) return '';
+
+        return variants
+            .map((variant) => `${variant.node?.title || ''} - ${variant.node?.inventoryQuantity ?? 0}`)
+            .join(' | ');
+    }
+
+    const totalInventory = node?.totalInventory ?? 0;
+    const hasOnlyDefaultVariant = node?.hasOnlyDefaultVariant;
+    const variantsCount = node?.variantsCount?.count ?? 0;
+
+    if (hasOnlyDefaultVariant) {
+        return `${totalInventory} in stock`;
+    }
+
+    return `${totalInventory} in stock for ${variantsCount} variant${variantsCount > 1 ? 's' : ''}`;
+};
+
+const formatSoldVariantsText = (soldVariants = []) => {
+    if (!soldVariants.length) return '-';
+
+    return soldVariants
+        .map((variant) => `${variant.title || ''} - Sold ${variant.quantity || 0}`)
+        .join(' | ');
+};
+
 function getCurrentQuarter() {
     const today = new Date();
     const month = today.getMonth() + 1;
@@ -477,4 +559,322 @@ async function fetchSalesMap(url, token, startDate, endDate) {
 
     return salesMap;
 }
+
+export const exportStockReport = async (req, res) => {
+    try {
+        const { filter = 0, picker } = req.query;
+        const settings = await Settings.findOne();
+        if (!settings) {
+            return errorResponse(res, 'Settings not found', 500);
+        }
+
+        const { sp_app_url: url, admin_api_access_token: token } = settings;
+        const headers = {
+            'X-Shopify-Access-Token': token,
+            'Content-Type': 'application/json'
+        };
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="stock_report.csv"');
+
+        if (String(filter) === '4') {
+            const { year, quarter } = getCurrentQuarter();
+            const [startCurrent, endCurrent] = getQuarterDates(year, quarter);
+            const [startPrev, endPrev] = getQuarterDates(year - 1, quarter);
+
+            const salesCurrent = await fetchSalesMap(url, token, startCurrent, endCurrent);
+            const salesPrev = await fetchSalesMap(url, token, startPrev, endPrev);
+
+            const allIds = new Set([...Object.keys(salesCurrent), ...Object.keys(salesPrev)]);
+            const comparison = [];
+
+            allIds.forEach((id) => {
+                const currentQty = salesCurrent[id]?.quantity || 0;
+                const prevQty = salesPrev[id]?.quantity || 0;
+                const diff = currentQty - prevQty;
+
+                comparison.push({
+                    title: salesCurrent[id]?.title || salesPrev[id]?.title || '',
+                    currentQty,
+                    prevQty,
+                    difference: diff,
+                    percentage: prevQty === 0 ? null : (diff / prevQty) * 100,
+                    trend: currentQty > prevQty ? 'up' : currentQty < prevQty ? 'down' : 'same',
+                });
+            });
+
+            comparison.sort((a, b) => b.currentQty - a.currentQty);
+
+            const csvHeaders = [
+                'Product',
+                'Current Quarter Sold Qty',
+                'Previous Year Quarter Sold Qty',
+                'Difference',
+                'Percentage Change',
+                'Trend',
+            ];
+
+            const csvLines = [
+                csvHeaders.map(csvEscape).join(','),
+                ...comparison.map((row) => [
+                    row.title,
+                    row.currentQty,
+                    row.prevQty,
+                    row.difference,
+                    row.percentage === null ? '—' : `${Number(row.percentage).toFixed(1)}%`,
+                    row.trend === 'up' ? 'Up' : row.trend === 'down' ? 'Down' : 'Same',
+                ].map(csvEscape).join(','))
+            ];
+
+            return res.status(200).send(`${UTF8_BOM}${csvLines.join('\n')}`);
+        }
+
+        if (String(filter) === '0' || String(filter) === '1') {
+            const products = [];
+            let after = null;
+            let hasNextPage = true;
+
+            while (hasNextPage) {
+                let productsArgs = `first: 250`;
+                if (after) {
+                    productsArgs += `, after: "${after}"`;
+                }
+                if (String(filter) === '1') {
+                    productsArgs += `, query: "inventory_total:<=${lowStockThreshold}"`;
+                }
+
+                const query = {
+                    query: `query {
+                        products(${productsArgs}) {
+                            edges {
+                                node {
+                                    id
+                                    title
+                                    vendor
+                                    productType
+                                    totalInventory
+                                    tracksInventory
+                                    status
+                                    hasOnlyDefaultVariant
+                                    variantsCount { count }
+                                    category { id name }
+                                    variants(first: 250) {
+                                        edges {
+                                            node {
+                                                id
+                                                title
+                                                inventoryQuantity
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                        }
+                    }`
+                };
+
+                const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, { headers });
+
+                const edges = response.data?.data?.products?.edges || [];
+                products.push(...edges);
+
+                const pageInfo = response.data?.data?.products?.pageInfo || {};
+                hasNextPage = !!pageInfo.hasNextPage;
+                after = pageInfo.endCursor || null;
+            }
+
+            const csvHeaders = ['Product', 'Status', 'Inventory', 'Category', 'Type', 'Vendor'];
+            const csvLines = [
+                csvHeaders.map(csvEscape).join(','),
+                ...products.map((edge) => {
+                    const node = edge?.node || {};
+                    return [
+                        node.title || '—',
+                        node.status || '',
+                        formatInventoryText(node, filter),
+                        node?.category?.name || '',
+                        node.productType || '',
+                        node.vendor || '',
+                    ].map(csvEscape).join(',');
+                })
+            ];
+
+            return res.status(200).send(`${UTF8_BOM}${csvLines.join('\n')}`);
+        }
+
+        const parsedPicker = parsePickerRange(picker);
+        if (!parsedPicker || parsedPicker.length < 2) {
+            return errorResponse(res, 'Date range is required', 400);
+        }
+
+        const startDate = new Date(parsedPicker[0]).toISOString().split('T')[0];
+        const endDate = new Date(parsedPicker[1]).toISOString().split('T')[0];
+        const dateFilter = `created_at:>=${startDate} AND created_at:<=${endDate}`;
+
+        const salesMap = {};
+        let afterCursorFetch = null;
+        let hasNextPageFetch = true;
+
+        while (hasNextPageFetch) {
+            const cursorClause = afterCursorFetch ? `first: 250, after: "${afterCursorFetch}"` : `first: 250`;
+
+            const orders = {
+                query: `query {
+                    orders(${cursorClause}, query: "${dateFilter}") {
+                        edges {
+                            node {
+                                lineItems(first: 250) {
+                                    edges {
+                                        node {
+                                            quantity
+                                            product { id title }
+                                            variant { id title }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }`
+            };
+
+            const ordersResp = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, orders, { headers });
+            const edges = ordersResp.data?.data?.orders?.edges || [];
+
+            edges.forEach((order) => {
+                order.node.lineItems.edges.forEach((item) => {
+                    const productId = item.node.product?.id;
+                    if (!productId) return;
+
+                    if (!salesMap[productId]) {
+                        salesMap[productId] = {
+                            id: productId,
+                            title: item.node.product.title,
+                            quantity: 0,
+                            variants: {}
+                        };
+                    }
+
+                    salesMap[productId].quantity += item.node.quantity;
+
+                    const variantId = item.node.variant?.id;
+                    const variantTitle = item.node.variant?.title;
+
+                    if (variantId) {
+                        if (!salesMap[productId].variants[variantId]) {
+                            salesMap[productId].variants[variantId] = {
+                                id: variantId,
+                                title: variantTitle,
+                                quantity: 0
+                            };
+                        }
+
+                        salesMap[productId].variants[variantId].quantity += item.node.quantity;
+                    }
+                });
+            });
+
+            const pageInfoResp = ordersResp.data?.data?.orders?.pageInfo || {};
+            hasNextPageFetch = !!pageInfoResp.hasNextPage;
+            afterCursorFetch = pageInfoResp.endCursor || null;
+        }
+
+        const sortedProducts = Object.values(salesMap).sort((a, b) => {
+            if (String(filter) === '2') return b.quantity - a.quantity;
+            return a.quantity - b.quantity;
+        });
+
+        const productIds = sortedProducts.map((p) => p.id);
+        const chunkSize = 250;
+        const detailChunks = [];
+        for (let i = 0; i < productIds.length; i += chunkSize) {
+            detailChunks.push(productIds.slice(i, i + chunkSize));
+        }
+
+        const detailRequests = detailChunks.map((chunk) => {
+            const query = {
+                query: `query {
+                    nodes(ids: ${JSON.stringify(chunk)}) {
+                        ... on Product {
+                            id
+                            title
+                            vendor
+                            productType
+                            totalInventory
+                            tracksInventory
+                            status
+                            hasOnlyDefaultVariant
+                            variantsCount { count }
+                            category { id name }
+                            variants(first: 250) {
+                                edges {
+                                    node {
+                                        id
+                                        title
+                                        inventoryQuantity
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }`
+            };
+
+            return axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, { headers });
+        });
+
+        const detailResponses = await Promise.all(detailRequests);
+        const allProductDetails = detailResponses.flatMap((response) => response.data?.data?.nodes || []);
+
+        const detailById = new Map(allProductDetails.filter(Boolean).map((p) => [p.id, p]));
+
+        const rows = sortedProducts.map((product) => {
+            const detail = detailById.get(product.id) || {};
+            const node = {
+                ...detail,
+                qty: product.quantity || 0,
+                soldVariants: Object.values(product.variants || {})
+            };
+
+            return {
+                product: node.title || product.title || '—',
+                status: node.status || '',
+                qty: node.qty || 0,
+                soldVariants: formatSoldVariantsText(node.soldVariants),
+                inventory: formatInventoryText(node, filter),
+                category: node?.category?.name || '',
+                type: node.productType || '',
+                vendor: node.vendor || '',
+            };
+        });
+
+        const csvHeaders = ['Product', 'Status', 'Qty', 'Variant Sold', 'Inventory', 'Category', 'Type', 'Vendor'];
+        const csvLines = [
+            csvHeaders.map(csvEscape).join(','),
+            ...rows.map((row) => [
+                row.product,
+                row.status,
+                row.qty,
+                row.soldVariants,
+                row.inventory,
+                row.category,
+                row.type,
+                row.vendor,
+            ].map(csvEscape).join(','))
+        ];
+
+        return res.status(200).send(`${UTF8_BOM}${csvLines.join('\n')}`);
+    } catch (error) {
+        storeLog(`Stock report export failed: ${error.message}`);
+        return errorResponse(res, process.env.ERROR_MSG || 'CSV export failed', 500);
+    }
+};
 
