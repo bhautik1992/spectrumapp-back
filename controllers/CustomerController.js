@@ -697,6 +697,7 @@ export const segmentRecords = async (req, res) => {
     try {
         const { id, perPage, before, after, isNext } = req.query;
 
+
         let cursorClause = `first: ${perPage}, reverse: true`;
         if(isNext !== undefined){
             if(isNext === 'true'){
@@ -860,12 +861,15 @@ export const listCustomers1 = async (req, res) => {
 };
 
 // Manage "Trade Account" tag customers when they are created or updated in Shopify
+// export function listCustomers is in this file
 export const listCustomers = async (req, res) => {
+
     try {
         const batchSize = 250; // Shopify max
         let pageInfo = req.query.pageInfo || null;
 
         const settings = await Settings.findOne();
+
         if (!settings) {
             return errorResponse(res, "Settings not found", 500);
         }

@@ -1,0 +1,298 @@
+import axios from 'axios';
+import Customers from "../models/Customers.js";
+import Settings from "../models/Settings.js";
+import { errorResponse } from '../helpers/ResponseHandler.js';
+import { storeLog } from "../helpers/Common.js";
+import { leadStatusLabels } from '../config/constants.js';
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  // Escape quotes and wrap with quotes if needed
+  const needsQuotes = /[",\n\r]/.test(str);
+  const escaped = str.replace(/"/g, '""');
+  return needsQuotes ? `"${escaped}"` : escaped;
+};
+
+const sleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+const parseShopifyBody = (raw) => {
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const getRetryDelayMs = (error, attempt) => {
+  const retryAfterHeader = error?.response?.headers?.['retry-after'];
+  const retryAfterSeconds = Number(retryAfterHeader);
+
+  if (!Number.isNaN(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return retryAfterSeconds * 1000;
+  }
+
+  // Backoff: 600ms, 1200ms, 1800ms...
+  return 600 * attempt;
+};
+
+const requestWithRetry = async (url, config, maxAttempts = 3) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await axios.get(url, config);
+    } catch (error) {
+      lastError = error;
+      const status = error?.response?.status;
+      const canRetry = status === 429 || (status >= 500 && status < 600);
+
+      if (!canRetry || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = getRetryDelayMs(error, attempt);
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError;
+};
+
+const chunkArray = (arr, size) => {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
+
+export const listCustomersExport = async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const normalizedSearch = String(search).trim();
+    const regex = new RegExp(normalizedSearch, 'i');
+
+    const leadSourceMap = {
+      1: 'Web',
+      2: 'Phone Inquiry',
+      3: 'Partner - Referral',
+      4: 'Purchased - List',
+      5: 'Other',
+    };
+
+    const matchingLeadStatus = Object.entries(leadStatusLabels)
+      .filter(([_, label]) => label.toLowerCase().includes(normalizedSearch.toLowerCase()))
+      .map(([value]) => parseInt(value, 10));
+
+    const matchingLeadSource = Object.entries(leadSourceMap)
+      .filter(([_, label]) => label.toLowerCase().includes(normalizedSearch.toLowerCase()))
+      .map(([value]) => parseInt(value, 10));
+
+    const matchConditions = [];
+
+    if (normalizedSearch !== '') {
+      matchConditions.push({
+        $or: [
+          { shopify_cus_id: regex },
+          { salesforce_lead_id: regex },
+          { lead_first_name: regex },
+          { lead_last_name: regex },
+          { lead_company: regex },
+          { lead_email: regex },
+          { lead_phone: regex },
+          { full_name: regex },
+          ...(matchingLeadStatus.length > 0 ? [{ lead_status: { $in: matchingLeadStatus } }] : []),
+          ...(matchingLeadSource.length > 0 ? [{ lead_source: { $in: matchingLeadSource } }] : []),
+        ],
+      });
+    }
+
+    const matchStage = matchConditions.length > 0 ? { $match: { $and: matchConditions } } : { $match: {} };
+
+    const result = await Customers.aggregate([
+      {
+        $addFields: {
+          full_name: {
+            $concat: [
+              { $ifNull: ['$lead_first_name', ''] },
+              ' ',
+              { $ifNull: ['$lead_last_name', ''] },
+            ],
+          },
+        },
+      },
+      matchStage,
+      { $sort: { _id: -1 } },
+      { $project: { __v: 0 } },
+    ]);
+
+    const settings = await Settings.findOne();
+    if (!settings) return errorResponse(res, 'Settings not found', 500);
+
+    const { sp_app_url, admin_api_access_token } = settings;
+
+    const headers = {
+      'X-Shopify-Access-Token': admin_api_access_token,
+      'Content-Type': 'application/json',
+    };
+
+    // Fetch live customer values in bulk to keep CSV aligned with Customers list view.
+    const uniqueCustomerIds = [
+      ...new Set(
+        result
+          .map((customer) => String(customer.shopify_cus_id || '').trim())
+          .filter((id) => id)
+      ),
+    ];
+
+    const liveCustomerMap = new Map();
+    const customerIdChunks = chunkArray(uniqueCustomerIds, 100);
+
+    for (const customerChunk of customerIdChunks) {
+      try {
+        const customersResponse = await requestWithRetry(
+          `${sp_app_url}/admin/api/2025-07/customers.json?limit=250&fields=id,created_at,total_spent,orders_count,last_order_id&ids=${customerChunk.join(',')}`,
+          { headers },
+          3
+        );
+
+        const customers = customersResponse?.data?.customers || [];
+        for (const liveCustomer of customers) {
+          if (liveCustomer?.id) {
+            liveCustomerMap.set(String(liveCustomer.id), liveCustomer);
+          }
+        }
+      } catch (error) {
+        storeLog(`Customer export: bulk customer fetch failed for chunk size ${customerChunk.length}. Error: ${error.message}`);
+      }
+    }
+
+    const baseCustomers = result.map((customer) => {
+      const importedShopifyBody = parseShopifyBody(customer.shopify_request_body);
+      const liveCustomer = liveCustomerMap.get(String(customer.shopify_cus_id));
+
+      return {
+        ...customer,
+        customer_added_date: liveCustomer?.created_at || importedShopifyBody?.created_at || null,
+        amount_spent: liveCustomer?.total_spent ?? importedShopifyBody?.total_spent ?? '0.00',
+        orders_count: liveCustomer?.orders_count ?? importedShopifyBody?.orders_count ?? 0,
+        last_order_date: importedShopifyBody?.last_order?.created_at || null,
+        _last_order_id: liveCustomer?.last_order_id
+          ? String(liveCustomer.last_order_id)
+          : (importedShopifyBody?.last_order_id ? String(importedShopifyBody.last_order_id) : null),
+      };
+    });
+
+    // Resolve last order dates in bulk instead of per-customer requests.
+    const uniqueOrderIds = [
+      ...new Set(
+        baseCustomers
+          .map((customer) => customer._last_order_id)
+          .filter((id) => id)
+      ),
+    ];
+
+    const orderCreatedAtMap = new Map();
+    const orderIdChunks = chunkArray(uniqueOrderIds, 100);
+
+    for (const orderChunk of orderIdChunks) {
+      try {
+        const ordersResponse = await requestWithRetry(
+          `${sp_app_url}/admin/api/2025-07/orders.json?status=any&limit=250&fields=id,created_at&ids=${orderChunk.join(',')}`,
+          { headers },
+          3
+        );
+
+        const orders = ordersResponse?.data?.orders || [];
+        for (const order of orders) {
+          if (order?.id) {
+            orderCreatedAtMap.set(String(order.id), order.created_at || null);
+          }
+        }
+      } catch (error) {
+        storeLog(`Customer export: bulk order fetch failed for chunk size ${orderChunk.length}. Error: ${error.message}`);
+      }
+    }
+
+    const enrichedCustomers = baseCustomers.map((customer) => {
+      const resolvedLastOrderDate = customer._last_order_id
+        ? (orderCreatedAtMap.get(customer._last_order_id) || customer.last_order_date)
+        : customer.last_order_date;
+
+      return {
+        ...customer,
+        last_order_date: resolvedLastOrderDate || null,
+      };
+    });
+
+    const csvHeaders = [
+      'Name',
+      'Email',
+      'Phone',
+      'Orders',
+      'Amount Spent',
+      'Last Order',
+      'Created At',
+      'Status',
+    ];
+
+    const rows = enrichedCustomers.map((row) => {
+      const formatDate = (d) => {
+        if (d === null || d === undefined || d === '') return '';
+        try {
+          const dt = new Date(d);
+          if (Number.isNaN(dt.getTime())) return '';
+          const year = dt.getFullYear();
+          const month = String(dt.getMonth() + 1).padStart(2, '0');
+          const day = String(dt.getDate()).padStart(2, '0');
+          // Use ISO so Excel doesn't drop/convert values based on locale.
+          return `${year}-${month}-${day}`;
+        } catch {
+          return '';
+        }
+      };
+
+      const amountSpent = row.amount_spent === null || row.amount_spent === undefined ? '0.00' : row.amount_spent;
+
+      const phoneValue = row.lead_phone === null || row.lead_phone === undefined
+        ? ''
+        : String(row.lead_phone);
+
+      const phoneCsv = phoneValue ? `\t${phoneValue}` : '';
+
+      return [
+        row.full_name || '',
+        row.lead_email || '',
+        phoneCsv,
+        row.orders_count ?? 0,
+        amountSpent,
+        formatDate(row.last_order_date),
+        formatDate(row.customer_added_date),
+        (() => {
+          const raw = row.lead_status;
+          return leadStatusLabels[raw] || leadStatusLabels[String(raw)] || '';
+        })(),
+      ];
+    });
+
+    const csvLines = [
+      csvHeaders.map(csvEscape).join(','),
+      ...rows.map((r) => r.map(csvEscape).join(',')),
+    ];
+
+    const csv = csvLines.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="customers.csv"`);
+    return res.status(200).send(csv);
+  } catch (error) {
+    return errorResponse(res, process.env.ERROR_MSG || 'CSV export failed', 500);
+  }
+};
+
+
