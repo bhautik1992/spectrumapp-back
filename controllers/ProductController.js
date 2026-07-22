@@ -86,6 +86,77 @@ const formatSoldVariantsText = (soldVariants = []) => {
         .join(' | ');
 };
 
+const hasAnyLowStockVariant = (productNode) => {
+    const variants = productNode?.variants?.edges || [];
+    return variants.some((variant) => (variant.node?.inventoryQuantity ?? 0) <= lowStockThreshold);
+};
+
+const decodeSimpleCursor = (cursor) => {
+    try {
+        return JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+    } catch {
+        return null;
+    }
+};
+
+const encodeSimpleCursor = (item) => {
+    return Buffer.from(JSON.stringify({ last_id: item?.node?.id || item?.id || '' })).toString('base64');
+};
+
+const fetchAllProductsWithVariants = async (url, headers) => {
+    let after = null;
+    let hasNextPage = true;
+    const allProducts = [];
+
+    while (hasNextPage) {
+        const productsArgs = after ? `first: 250, after: "${after}"` : `first: 250`;
+
+        const query = {
+            query: `query {
+                products(${productsArgs}) {
+                    edges {
+                        node {
+                            id
+                            title
+                            vendor
+                            productType
+                            totalInventory
+                            tracksInventory
+                            status
+                            hasOnlyDefaultVariant
+                            variantsCount { count }
+                            category { id name }
+                            variants(first: 250) {
+                                edges {
+                                    node {
+                                        id
+                                        title
+                                        inventoryQuantity
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }`
+        };
+
+        const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, query, { headers });
+        const edges = response.data?.data?.products?.edges || [];
+        allProducts.push(...edges);
+
+        const pageInfo = response.data?.data?.products?.pageInfo || {};
+        hasNextPage = !!pageInfo.hasNextPage;
+        after = pageInfo.endCursor || null;
+    }
+
+    return allProducts;
+};
+
 function getCurrentQuarter() {
     const today = new Date();
     const month = today.getMonth() + 1;
@@ -128,10 +199,7 @@ export const index = async (req, res) => {
         const settings = await Settings.findOne();
         const { sp_app_url: url, admin_api_access_token: token } = settings;
 
-        if (filter == 0 || filter == 1) {
-            if(filter == 1){
-                cursorClause += `, query: "inventory_total:<=${lowStockThreshold}"`;
-            }
+        if (filter == 0) {
         
             const query = {
                 query: `query {
@@ -195,6 +263,41 @@ export const index = async (req, res) => {
             const total = response.data?.data?.productsCount?.count || 0;
 
             return successResponse(res, {products, pageInfo, total});   
+        } else if (filter == 1) {
+            const allProducts = await fetchAllProductsWithVariants(url, {
+                'X-Shopify-Access-Token': token,
+                'Content-Type': 'application/json'
+            });
+
+            const lowStockProducts = allProducts.filter((edge) => hasAnyLowStockVariant(edge?.node));
+            const perPageInt = parseInt(perPage, 10);
+
+            let startIndex = 0;
+            if (after && isNext === 'true') {
+                const decoded = decodeSimpleCursor(after);
+                if (decoded) {
+                    const idx = lowStockProducts.findIndex((p) => p.node?.id === decoded.last_id);
+                    startIndex = idx >= 0 ? idx + 1 : 0;
+                }
+            } else if (before && isNext === 'false') {
+                const decoded = decodeSimpleCursor(before);
+                if (decoded) {
+                    const idx = lowStockProducts.findIndex((p) => p.node?.id === decoded.last_id);
+                    startIndex = idx - perPageInt >= 0 ? idx - perPageInt : 0;
+                }
+            }
+
+            const endIndex = startIndex + perPageInt;
+            const products = lowStockProducts.slice(startIndex, endIndex);
+
+            const pageInfo = {
+                hasNextPage: endIndex < lowStockProducts.length,
+                hasPreviousPage: startIndex > 0,
+                startCursor: products[0] ? encodeSimpleCursor(products[0]) : null,
+                endCursor: products[products.length - 1] ? encodeSimpleCursor(products[products.length - 1]) : null,
+            };
+
+            return successResponse(res, { products, pageInfo, total: lowStockProducts.length });
         }else if (filter == 4) {
             const { year, quarter } = getCurrentQuarter();
 
@@ -629,7 +732,7 @@ export const exportStockReport = async (req, res) => {
             return res.status(200).send(`${UTF8_BOM}${csvLines.join('\n')}`);
         }
 
-        if (String(filter) === '0' || String(filter) === '1') {
+        if (String(filter) === '0') {
             const products = [];
             let after = null;
             let hasNextPage = true;
@@ -638,9 +741,6 @@ export const exportStockReport = async (req, res) => {
                 let productsArgs = `first: 250`;
                 if (after) {
                     productsArgs += `, after: "${after}"`;
-                }
-                if (String(filter) === '1') {
-                    productsArgs += `, query: "inventory_total:<=${lowStockThreshold}"`;
                 }
 
                 const query = {
@@ -691,6 +791,29 @@ export const exportStockReport = async (req, res) => {
             const csvLines = [
                 csvHeaders.map(csvEscape).join(','),
                 ...products.map((edge) => {
+                    const node = edge?.node || {};
+                    return [
+                        node.title || '—',
+                        node.status || '',
+                        formatInventoryText(node, filter),
+                        node?.category?.name || '',
+                        node.productType || '',
+                        node.vendor || '',
+                    ].map(csvEscape).join(',');
+                })
+            ];
+
+            return res.status(200).send(`${UTF8_BOM}${csvLines.join('\n')}`);
+        }
+
+        if (String(filter) === '1') {
+            const allProducts = await fetchAllProductsWithVariants(url, headers);
+            const lowStockProducts = allProducts.filter((edge) => hasAnyLowStockVariant(edge?.node));
+
+            const csvHeaders = ['Product', 'Status', 'Inventory', 'Category', 'Type', 'Vendor'];
+            const csvLines = [
+                csvHeaders.map(csvEscape).join(','),
+                ...lowStockProducts.map((edge) => {
                     const node = edge?.node || {};
                     return [
                         node.title || '—',
