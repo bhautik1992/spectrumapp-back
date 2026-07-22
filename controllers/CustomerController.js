@@ -696,14 +696,15 @@ export const segmentList = async (req, res) => {
 export const segmentRecords = async (req, res) => {
     try {
         const { id, perPage, before, after, isNext } = req.query;
+        const sortClause = `sortKey: "updated_at", reverse: true`;
 
 
-        let cursorClause = `first: ${perPage}, reverse: true`;
+        let cursorClause = `first: ${perPage}`;
         if(isNext !== undefined){
             if(isNext === 'true'){
-                cursorClause = ` first: ${perPage}, after: "${after}", reverse: true`;
+                cursorClause = ` first: ${perPage}, after: "${after}"`;
             }else{
-                cursorClause = ` last: ${perPage}, before: "${before}", reverse: true`;
+                cursorClause = ` last: ${perPage}, before: "${before}"`;
             }
         }
 
@@ -712,7 +713,7 @@ export const segmentRecords = async (req, res) => {
   
         const query = {
             query: `query {
-                customerSegmentMembers(segmentId: "${id}", ${cursorClause}) {
+                customerSegmentMembers(segmentId: "${id}", ${sortClause}, ${cursorClause}) {
                     edges {
                         node {
                             id
