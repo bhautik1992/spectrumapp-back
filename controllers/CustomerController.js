@@ -756,12 +756,71 @@ export const segmentRecords = async (req, res) => {
                 'Content-Type': 'application/json'
             }
         });
-  
+
         const members = response.data?.data?.customerSegmentMembers?.edges || [];
+
+        // Enrich Added Date by resolving member/customer ids via Customer nodes query.
+        const normalizeCustomerGid = (memberId) => {
+            if (!memberId || typeof memberId !== 'string') return null;
+            if (memberId.includes('/Customer/')) return memberId;
+            if (memberId.includes('/CustomerSegmentMember/')) {
+                return memberId.replace('/CustomerSegmentMember/', '/Customer/');
+            }
+            return null;
+        };
+
+        const customerIds = [...new Set(
+            members
+                .map((edge) => normalizeCustomerGid(edge?.node?.id))
+                .filter(Boolean)
+        )];
+
+        const createdAtByCustomerId = new Map();
+
+        for (let i = 0; i < customerIds.length; i += 250) {
+            const chunk = customerIds.slice(i, i + 250);
+
+            const customerNodesQuery = {
+                query: `query {
+                    nodes(ids: ${JSON.stringify(chunk)}) {
+                        ... on Customer {
+                            id
+                            createdAt
+                        }
+                    }
+                }`
+            };
+
+            const customerNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, customerNodesQuery, {
+                headers: {
+                    'X-Shopify-Access-Token': token,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const nodes = customerNodesResponse.data?.data?.nodes || [];
+            nodes.forEach((node) => {
+                if (node?.id && node?.createdAt) {
+                    createdAtByCustomerId.set(node.id, node.createdAt);
+                }
+            });
+        }
+
+        const membersWithCreatedAt = members.map((edge) => {
+            const customerId = normalizeCustomerGid(edge?.node?.id);
+            return {
+                ...edge,
+                node: {
+                    ...edge.node,
+                    createdAt: customerId ? (createdAtByCustomerId.get(customerId) || null) : null,
+                }
+            };
+        });
+
         const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
         const totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
 
-        return successResponse(res, {members, pageInfo, totalCount});
+        return successResponse(res, {members: membersWithCreatedAt, pageInfo, totalCount});
     } catch (error) {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
