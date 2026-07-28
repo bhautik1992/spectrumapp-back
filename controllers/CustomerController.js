@@ -696,7 +696,10 @@ export const segmentList = async (req, res) => {
 export const segmentRecords = async (req, res) => {
     try {
         const { id, perPage, before, after, isNext } = req.query;
-        const sortClause = `sortKey: "updated_at", reverse: true`;
+        const spendersSegmentId = 'gid://shopify/Segment/475643838717';
+        const sortClause = (id === spendersSegmentId)
+            ? `sortKey: "amount_spent", reverse: true`
+            : `sortKey: "updated_at", reverse: true`;
 
 
         let cursorClause = `first: ${perPage}`;
