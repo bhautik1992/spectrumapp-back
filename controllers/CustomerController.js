@@ -737,6 +737,7 @@ export const segmentRecords = async (req, res) => {
                                 phoneNumber
                             }
                             numberOfOrders
+                            lastOrderId
                         }
                     }
                     pageInfo {
@@ -817,10 +818,91 @@ export const segmentRecords = async (req, res) => {
             };
         });
 
+        // Enrich last purchase details from lastOrderId.
+        const orderIds = [...new Set(
+            membersWithCreatedAt
+                .map((edge) => edge?.node?.lastOrderId)
+                .filter(Boolean)
+        )];
+
+        const orderDetailsById = new Map();
+
+        for (let i = 0; i < orderIds.length; i += 250) {
+            const chunk = orderIds.slice(i, i + 250);
+
+            const orderNodesQuery = {
+                query: `query {
+                    nodes(ids: ${JSON.stringify(chunk)}) {
+                        ... on Order {
+                            id
+                            createdAt
+                            lineItems(first: 50) {
+                                edges {
+                                    node {
+                                        name
+                                        title
+                                        variantTitle
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }`
+            };
+
+            const orderNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, orderNodesQuery, {
+                headers: {
+                    'X-Shopify-Access-Token': token,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const orderNodes = orderNodesResponse.data?.data?.nodes || [];
+            orderNodes.forEach((orderNode) => {
+                if (!orderNode?.id) return;
+
+                const lineItemNames = (orderNode?.lineItems?.edges || [])
+                    .map((edge) => {
+                        const item = edge?.node;
+                        if (!item) return null;
+
+                        if (item?.name) return item.name;
+                        if (item?.title) {
+                            return `${item.title}${item?.variantTitle ? ` / ${item.variantTitle}` : ''}`;
+                        }
+
+                        return null;
+                    })
+                    .filter(Boolean);
+
+                const uniqueLineItemNames = [...new Set(lineItemNames)];
+                const purchasedWhat = uniqueLineItemNames.length ? uniqueLineItemNames.join(', ') : null;
+
+                orderDetailsById.set(orderNode.id, {
+                    createdAt: orderNode?.createdAt || null,
+                    purchasedWhat: purchasedWhat || null,
+                });
+            });
+        }
+
+        const membersEnriched = membersWithCreatedAt.map((edge) => {
+            const orderId = edge?.node?.lastOrderId;
+            const orderDetails = orderId ? orderDetailsById.get(orderId) : null;
+
+            return {
+                ...edge,
+                node: {
+                    ...edge.node,
+                    lastPurchasedAt: orderDetails?.createdAt || null,
+                    purchasedWhat: orderDetails?.purchasedWhat || null,
+                }
+            };
+        });
+
         const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
         const totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
 
-        return successResponse(res, {members: membersWithCreatedAt, pageInfo, totalCount});
+        return successResponse(res, {members: membersEnriched, pageInfo, totalCount});
     } catch (error) {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
