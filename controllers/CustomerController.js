@@ -695,29 +695,43 @@ export const segmentList = async (req, res) => {
 
 export const segmentRecords = async (req, res) => {
     try {
-        const { id, perPage, before, after, isNext } = req.query;
+        const { id, perPage, before, after, isNext, search = '' } = req.query;
         const spendersSegmentId = 'gid://shopify/Segment/475643838717';
         const sortClause = (id === spendersSegmentId)
             ? `sortKey: "amount_spent", reverse: true`
             : `sortKey: "updated_at", reverse: true`;
+        const normalizedSearch = String(search || '').trim().toLowerCase();
 
 
-        let cursorClause = `first: ${perPage}`;
-        if(isNext !== undefined){
-            if(isNext === 'true'){
-                cursorClause = ` first: ${perPage}, after: "${after}"`;
-            }else{
-                cursorClause = ` last: ${perPage}, before: "${before}"`;
+        const resolveCursorClause = ({ pageSize, direction, afterCursor, beforeCursor }) => {
+            if (direction === 'next') {
+                return ` first: ${pageSize}, after: "${afterCursor}"`;
             }
-        }
+
+            if (direction === 'prev') {
+                return ` last: ${pageSize}, before: "${beforeCursor}"`;
+            }
+
+            return `first: ${pageSize}`;
+        };
+
+        const pageSize = parseInt(perPage, 10) || 10;
+        const requestedDirection = isNext === undefined ? 'first' : (isNext === 'true' ? 'next' : 'prev');
+        const cursorClause = resolveCursorClause({
+            pageSize,
+            direction: requestedDirection,
+            afterCursor: after,
+            beforeCursor: before,
+        });
 
         const settings = await Settings.findOne();
         const { sp_app_url: url, admin_api_access_token: token } = settings;
   
-        const query = {
+        const baseQuery = (cursor) => ({
             query: `query {
-                customerSegmentMembers(segmentId: "${id}", ${sortClause}, ${cursorClause}) {
+                customerSegmentMembers(segmentId: "${id}", ${sortClause}, ${cursor}) {
                     edges {
+                        cursor
                         node {
                             id
                             displayName
@@ -752,16 +766,73 @@ export const segmentRecords = async (req, res) => {
                     totalCount
                 }
             }`
-        };
-        
-        const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,query,{
-            headers: {
-                'X-Shopify-Access-Token': token,
-                'Content-Type': 'application/json'
-            }
         });
 
-        const members = response.data?.data?.customerSegmentMembers?.edges || [];
+        const fetchSegmentPage = async (cursor) => {
+            const response = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, baseQuery(cursor), {
+                headers: {
+                    'X-Shopify-Access-Token': token,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            return {
+                members: response.data?.data?.customerSegmentMembers?.edges || [],
+                pageInfo: response.data?.data?.customerSegmentMembers?.pageInfo || {},
+                totalCount: response.data?.data?.customerSegmentMembers?.totalCount || 0,
+            };
+        };
+
+        const getNormalizedCustomerIdentity = (edge) => {
+            const displayName = String(edge?.node?.displayName || '').toLowerCase();
+            const emailAddress = String(edge?.node?.defaultEmailAddress?.emailAddress || '').toLowerCase();
+            return { displayName, emailAddress };
+        };
+
+        const matchesSearch = (edge) => {
+            if (!normalizedSearch) return true;
+
+            const { displayName, emailAddress } = getNormalizedCustomerIdentity(edge);
+            return displayName.includes(normalizedSearch) || emailAddress.includes(normalizedSearch);
+        };
+
+        const fetchAllMembers = async () => {
+            const allMembers = [];
+            let hasNextPage = true;
+            let nextCursor = null;
+
+            while (hasNextPage) {
+                const cursor = nextCursor
+                    ? resolveCursorClause({ pageSize: 250, direction: 'next', afterCursor: nextCursor })
+                    : resolveCursorClause({ pageSize: 250, direction: 'first' });
+
+                const page = await fetchSegmentPage(cursor);
+                allMembers.push(...page.members);
+                hasNextPage = !!page.pageInfo?.hasNextPage;
+                nextCursor = page.pageInfo?.endCursor || null;
+            }
+
+            return allMembers;
+        };
+
+        const response = normalizedSearch
+            ? { data: { data: { customerSegmentMembers: { edges: await fetchAllMembers() } } } }
+            : await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, baseQuery(cursorClause), {
+                headers: {
+                    'X-Shopify-Access-Token': token,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+        const rawMembers = normalizedSearch
+            ? response.data?.data?.customerSegmentMembers?.edges || []
+            : response.data?.data?.customerSegmentMembers?.edges || [];
+
+        const filteredMembers = normalizedSearch
+            ? rawMembers.filter(matchesSearch)
+            : rawMembers;
+
+        const members = filteredMembers;
 
         // Enrich Added Date by resolving member/customer ids via Customer nodes query.
         const normalizeCustomerGid = (memberId) => {
@@ -902,8 +973,40 @@ export const segmentRecords = async (req, res) => {
             };
         });
 
-        const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
-        const totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
+        let pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
+        let totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
+
+        if (normalizedSearch) {
+            const filteredEdgeCount = membersEnriched.length;
+            totalCount = filteredEdgeCount;
+
+            let startIndex = 0;
+            let endIndex = Math.min(pageSize, filteredEdgeCount);
+
+            if (requestedDirection === 'next' && after) {
+                const afterIndex = membersEnriched.findIndex((edge) => edge?.cursor === after);
+                if (afterIndex >= 0) {
+                    startIndex = afterIndex + 1;
+                    endIndex = Math.min(startIndex + pageSize, filteredEdgeCount);
+                }
+            } else if (requestedDirection === 'prev' && before) {
+                const beforeIndex = membersEnriched.findIndex((edge) => edge?.cursor === before);
+                if (beforeIndex >= 0) {
+                    endIndex = beforeIndex;
+                    startIndex = Math.max(0, endIndex - pageSize);
+                }
+            }
+
+            const pageSlice = membersEnriched.slice(startIndex, endIndex);
+            pageInfo = {
+                hasPreviousPage: startIndex > 0,
+                hasNextPage: endIndex < filteredEdgeCount,
+                startCursor: pageSlice[0]?.cursor || null,
+                endCursor: pageSlice[pageSlice.length - 1]?.cursor || null,
+            };
+
+            return successResponse(res, {members: pageSlice, pageInfo, totalCount});
+        }
 
         return successResponse(res, {members: membersEnriched, pageInfo, totalCount});
     } catch (error) {
