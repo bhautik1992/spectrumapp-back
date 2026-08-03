@@ -31,6 +31,103 @@ const sanitizeFileName = (value) => {
     .replace(/\s+/g, '_') || 'segment';
 };
 
+const formatInsightDate = (value) => {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[date.getMonth()] || '';
+  const year = date.getFullYear();
+
+  return `${day} ${month}, ${year}`;
+};
+
+const normalizeCustomerGid = (memberId) => {
+  if (!memberId || typeof memberId !== 'string') return null;
+  if (memberId.includes('/Customer/')) return memberId;
+  if (memberId.includes('/CustomerSegmentMember/')) {
+    return memberId.replace('/CustomerSegmentMember/', '/Customer/');
+  }
+
+  return null;
+};
+
+const BIG_SPENDER_SEGMENT_MONTHS = {
+  'gid://shopify/Segment/1145045680510': 3,
+  'gid://shopify/Segment/1145045713278': 6,
+  'gid://shopify/Segment/1145045746046': 12,
+};
+
+const parseLinkHeaderNextUrl = (linkHeader) => {
+  if (!linkHeader) return null;
+  const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+  return nextMatch ? nextMatch[1] : null;
+};
+
+const getWindowStartIso = (months) => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setMonth(date.getMonth() - months);
+  return date.toISOString();
+};
+
+const extractNumericCustomerId = (customerGid) => {
+  if (!customerGid || typeof customerGid !== 'string') return null;
+  const match = customerGid.match(/\/(\d+)$/);
+  return match ? match[1] : null;
+};
+
+const getDefaultWindowMetrics = () => ({
+  amount: 0,
+  currencyCode: null,
+  orderCount: 0,
+});
+
+const calculateWindowMetricsForCustomers = async ({ customerIds, months, shopUrl, headers }) => {
+  const targetCustomerIds = new Set((customerIds || []).map((id) => String(id)).filter(Boolean));
+  const metricsByCustomerId = new Map();
+  if (!targetCustomerIds.size) return metricsByCustomerId;
+
+  const createdAtMin = encodeURIComponent(getWindowStartIso(months));
+  let nextUrl = `${shopUrl}/admin/api/2025-07/orders.json?status=any&limit=250&fields=id,total_price,currency,customer&created_at_min=${createdAtMin}`;
+
+  while (nextUrl) {
+    const response = await requestWithRetry(
+      {
+        method: 'get',
+        url: nextUrl,
+        headers,
+      },
+      3
+    );
+
+    const orders = response?.data?.orders || [];
+    orders.forEach((order) => {
+      const customerId = order?.customer?.id ? String(order.customer.id) : null;
+      if (!customerId || !targetCustomerIds.has(customerId)) return;
+
+      const current = metricsByCustomerId.get(customerId) || getDefaultWindowMetrics();
+      const orderAmount = parseFloat(order?.total_price || 0);
+      if (!Number.isNaN(orderAmount)) {
+        current.amount += orderAmount;
+      }
+      current.orderCount += 1;
+      if (!current.currencyCode && order?.currency) {
+        current.currencyCode = order.currency;
+      }
+
+      metricsByCustomerId.set(customerId, current);
+    });
+
+    nextUrl = parseLinkHeaderNextUrl(response?.headers?.link);
+  }
+
+  return metricsByCustomerId;
+};
+
 const sleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
@@ -321,6 +418,10 @@ export const listCustomersExport = async (req, res) => {
 export const listSegmentMembersExport = async (req, res) => {
   try {
     const { id, segmentName = 'segment' } = req.query;
+    const spenderWindowMonths = BIG_SPENDER_SEGMENT_MONTHS[id] || null;
+    const sortClause = spenderWindowMonths
+      ? 'sortKey: "amount_spent", reverse: true'
+      : 'sortKey: "updated_at", reverse: true';
 
     if (!id) {
       return errorResponse(res, 'Segment id is required', 400);
@@ -340,9 +441,10 @@ export const listSegmentMembersExport = async (req, res) => {
       'Customer Name',
       'Phone',
       'Email',
-      'Email Subscription',
+      'Email subscription',
       'Location',
       'Orders',
+      'Added Date',
       'Amount Spent',
     ];
 
@@ -352,90 +454,181 @@ export const listSegmentMembersExport = async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="customer_insights_${safeSegmentName}.csv"`);
     res.write(`${UTF8_BOM}${csvHeaders.map(csvEscape).join(',')}\n`);
 
-    let hasNextPage = true;
-    let afterCursor = null;
-    const pageSize = 250;
+    const fetchAllMembers = async () => {
+      const allMembers = [];
+      let hasNextPage = true;
+      let afterCursor = null;
+      const pageSize = 250;
 
-    while (hasNextPage) {
-      const cursorClause = afterCursor
-        ? `first: ${pageSize}, after: \"${afterCursor}\", reverse: true`
-        : `first: ${pageSize}, reverse: true`;
+      while (hasNextPage) {
+        const cursorClause = afterCursor
+          ? `first: ${pageSize}, after: \"${afterCursor}\"`
+          : `first: ${pageSize}`;
 
-      const query = {
-        query: `query {
-          customerSegmentMembers(segmentId: "${id}", ${cursorClause}) {
-            edges {
-              node {
-                id
-                displayName
-                defaultEmailAddress {
-                  emailAddress
-                  marketingState
+        const query = {
+          query: `query {
+            customerSegmentMembers(segmentId: "${id}", ${sortClause}, ${cursorClause}) {
+              edges {
+                cursor
+                node {
+                  id
+                  displayName
+                  defaultEmailAddress {
+                    emailAddress
+                    marketingState
+                  }
+                  defaultAddress {
+                    city
+                    country
+                  }
+                  amountSpent {
+                    amount
+                    currencyCode
+                  }
+                  defaultPhoneNumber {
+                    phoneNumber
+                  }
+                  numberOfOrders
                 }
-                defaultAddress {
-                  city
-                  country
-                }
-                amountSpent {
-                  amount
-                  currencyCode
-                }
-                defaultPhoneNumber {
-                  phoneNumber
-                }
-                numberOfOrders
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
               }
             }
-            pageInfo {
-              hasNextPage
-              endCursor
+          }`,
+        };
+
+        const response = await requestWithRetry(
+          {
+            method: 'post',
+            url: `${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+            headers,
+            data: query,
+          },
+          3
+        );
+
+        const members = response?.data?.data?.customerSegmentMembers?.edges || [];
+        const pageInfo = response?.data?.data?.customerSegmentMembers?.pageInfo || {};
+
+        allMembers.push(...members);
+        hasNextPage = !!pageInfo?.hasNextPage;
+        afterCursor = pageInfo?.endCursor || null;
+      }
+
+      return allMembers;
+    };
+
+    const allMembers = await fetchAllMembers();
+
+    let orderedMembers = allMembers;
+    if (spenderWindowMonths) {
+      const customerIds = [...new Set(
+        allMembers
+          .map((edge) => extractNumericCustomerId(normalizeCustomerGid(edge?.node?.id)))
+          .filter(Boolean)
+      )];
+
+      const metricsByCustomerId = await calculateWindowMetricsForCustomers({
+        customerIds,
+        months: spenderWindowMonths,
+        shopUrl: url,
+        headers,
+      });
+
+      orderedMembers = allMembers.map((edge) => {
+        const customerId = extractNumericCustomerId(normalizeCustomerGid(edge?.node?.id));
+        const windowMetrics = (customerId && metricsByCustomerId.get(customerId)) || getDefaultWindowMetrics();
+        const fallbackCurrency = edge?.node?.amountSpent?.currencyCode || windowMetrics.currencyCode || 'GBP';
+
+        return {
+          ...edge,
+          node: {
+            ...edge.node,
+            numberOfOrders: windowMetrics.orderCount,
+            amountSpent: {
+              amount: windowMetrics.amount.toFixed(2),
+              currencyCode: fallbackCurrency,
+            },
+          }
+        };
+      });
+
+      orderedMembers.sort((a, b) => {
+        const amountA = parseFloat(a?.node?.amountSpent?.amount || 0);
+        const amountB = parseFloat(b?.node?.amountSpent?.amount || 0);
+        return amountB - amountA;
+      });
+    }
+
+    const customerIds = [...new Set(
+      orderedMembers
+        .map((edge) => normalizeCustomerGid(edge?.node?.id))
+        .filter(Boolean)
+    )];
+
+    const createdAtByCustomerId = new Map();
+
+    for (let i = 0; i < customerIds.length; i += 250) {
+      const chunk = customerIds.slice(i, i + 250);
+      const customerNodesQuery = {
+        query: `query {
+          nodes(ids: ${JSON.stringify(chunk)}) {
+            ... on Customer {
+              id
+              createdAt
             }
           }
         }`,
       };
 
-      const response = await requestWithRetry(
+      const customerNodesResponse = await requestWithRetry(
         {
           method: 'post',
           url: `${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
           headers,
-          data: query,
+          data: customerNodesQuery,
         },
         3
       );
 
-      const members = response.data?.data?.customerSegmentMembers?.edges || [];
-      const pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
+      const nodes = customerNodesResponse?.data?.data?.nodes || [];
+      nodes.forEach((node) => {
+        if (node?.id && node?.createdAt) {
+          createdAtByCustomerId.set(node.id, node.createdAt);
+        }
+      });
+    }
 
-      for (const edge of members) {
-        const node = edge?.node || {};
-        const city = node?.defaultAddress?.city || '';
-        const country = node?.defaultAddress?.country || '';
-        const location = [city, country].filter(Boolean).join(', ');
+    for (const edge of orderedMembers) {
+      const node = edge?.node || {};
+      const city = node?.defaultAddress?.city || '';
+      const country = node?.defaultAddress?.country || '';
+      const location = [city, country].filter(Boolean).join(', ');
 
-        const amount = node?.amountSpent?.amount || '';
-        const currencyCode = node?.amountSpent?.currencyCode || '';
-        const currencyPrefix = currencySymbolMap[currencyCode] || currencyCode;
-        const amountSpent = amount && currencyCode ? `${currencyPrefix}${amount}` : '';
+      const amount = node?.amountSpent?.amount || '';
+      const currencyCode = node?.amountSpent?.currencyCode || '';
+      const currencyPrefix = currencySymbolMap[currencyCode] || currencyCode;
+      const amountSpent = amount && currencyCode ? `${currencyPrefix}${amount}` : '';
 
-        const phoneValue = node?.defaultPhoneNumber?.phoneNumber || '';
-        const phoneCsv = phoneValue ? `\t${phoneValue}` : '';
+      const phoneValue = node?.defaultPhoneNumber?.phoneNumber || '';
+      const phoneCsv = phoneValue ? `\t${phoneValue}` : '';
+      const customerId = normalizeCustomerGid(node?.id);
+      const addedDate = customerId ? formatInsightDate(createdAtByCustomerId.get(customerId) || null) : '';
 
-        const row = [
-          node?.displayName || '',
-          phoneCsv,
-          node?.defaultEmailAddress?.emailAddress || '',
-          node?.defaultEmailAddress?.marketingState || '',
-          location,
-          node?.numberOfOrders ?? 0,
-          amountSpent,
-        ];
+      const row = [
+        node?.displayName || '',
+        phoneCsv,
+        node?.defaultEmailAddress?.emailAddress || '',
+        node?.defaultEmailAddress?.marketingState || '',
+        location,
+        node?.numberOfOrders ?? 0,
+        addedDate,
+        amountSpent,
+      ];
 
-        res.write(`${row.map(csvEscape).join(',')}\n`);
-      }
-
-      hasNextPage = !!pageInfo?.hasNextPage;
-      afterCursor = pageInfo?.endCursor || null;
+      res.write(`${row.map(csvEscape).join(',')}\n`);
     }
 
     return res.end();

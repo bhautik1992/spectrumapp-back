@@ -9,6 +9,96 @@ import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
 import jsforce from 'jsforce';
 
+const BIG_SPENDER_SEGMENT_MONTHS = {
+    'gid://shopify/Segment/1145045680510': 3,
+    'gid://shopify/Segment/1145045713278': 6,
+    'gid://shopify/Segment/1145045746046': 12,
+};
+
+const parseLinkHeaderNextPageInfo = (linkHeader) => {
+    if (!linkHeader) return null;
+    const nextMatch = linkHeader.match(/<[^>]+[?&]page_info=([^&>]+)[^>]*>;\s*rel="next"/i);
+    return nextMatch ? nextMatch[1] : null;
+};
+
+const parseLinkHeaderNextUrl = (linkHeader) => {
+    if (!linkHeader) return null;
+    const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+    return nextMatch ? nextMatch[1] : null;
+};
+
+const getWindowStartIso = (months) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setMonth(date.getMonth() - months);
+    return date.toISOString();
+};
+
+const normalizeCustomerGidFromMember = (memberId) => {
+    if (!memberId || typeof memberId !== 'string') return null;
+    if (memberId.includes('/Customer/')) return memberId;
+    if (memberId.includes('/CustomerSegmentMember/')) {
+        return memberId.replace('/CustomerSegmentMember/', '/Customer/');
+    }
+    return null;
+};
+
+const extractNumericCustomerId = (customerGid) => {
+    if (!customerGid || typeof customerGid !== 'string') return null;
+    const match = customerGid.match(/\/(\d+)$/);
+    return match ? match[1] : null;
+};
+
+const SEGMENT_WINDOW_CACHE_TTL_MS = 5 * 60 * 1000;
+const segmentWindowMembersCache = new Map();
+
+const getDefaultWindowMetrics = () => ({
+    amount: 0,
+    currencyCode: null,
+    orderCount: 0,
+});
+
+const calculateWindowMetricsForCustomers = async ({ customerIds, months, shopUrl, token }) => {
+    const targetCustomerIds = new Set((customerIds || []).map((id) => String(id)).filter(Boolean));
+    const metricsByCustomerId = new Map();
+    if (!targetCustomerIds.size) return metricsByCustomerId;
+
+    const createdAtMin = encodeURIComponent(getWindowStartIso(months));
+    let nextUrl = `${shopUrl}/admin/api/2025-07/orders.json?status=any&limit=250&fields=id,total_price,currency,customer&created_at_min=${createdAtMin}`;
+
+    while (nextUrl) {
+
+        const response = await axios.get(nextUrl, {
+            headers: {
+                'X-Shopify-Access-Token': token,
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const orders = response.data?.orders || [];
+        orders.forEach((order) => {
+            const customerId = order?.customer?.id ? String(order.customer.id) : null;
+            if (!customerId || !targetCustomerIds.has(customerId)) return;
+
+            const current = metricsByCustomerId.get(customerId) || getDefaultWindowMetrics();
+            const orderAmount = parseFloat(order?.total_price || 0);
+            if (!Number.isNaN(orderAmount)) {
+                current.amount += orderAmount;
+            }
+            current.orderCount += 1;
+            if (!current.currencyCode && order?.currency) {
+                current.currencyCode = order.currency;
+            }
+
+            metricsByCustomerId.set(customerId, current);
+        });
+
+        nextUrl = parseLinkHeaderNextUrl(response.headers?.link);
+    }
+
+    return metricsByCustomerId;
+};
+
 export const edit = async (req, res) => {
     try{
         const { id } = req.params;
@@ -696,8 +786,8 @@ export const segmentList = async (req, res) => {
 export const segmentRecords = async (req, res) => {
     try {
         const { id, perPage, before, after, isNext, search = '' } = req.query;
-        const spendersSegmentId = 'gid://shopify/Segment/475643838717';
-        const sortClause = (id === spendersSegmentId)
+        const spenderWindowMonths = BIG_SPENDER_SEGMENT_MONTHS[id] || null;
+        const sortClause = spenderWindowMonths
             ? `sortKey: "amount_spent", reverse: true`
             : `sortKey: "updated_at", reverse: true`;
         const normalizedSearch = String(search || '').trim().toLowerCase();
@@ -814,6 +904,227 @@ export const segmentRecords = async (req, res) => {
 
             return allMembers;
         };
+
+        if (spenderWindowMonths) {
+            const cacheKey = `${id}|${spenderWindowMonths}`;
+            const cached = segmentWindowMembersCache.get(cacheKey);
+
+            let membersWithWindowSpend = null;
+            if (cached && cached.expiresAt > Date.now()) {
+                membersWithWindowSpend = cached.members;
+            } else {
+                const rawMembers = await fetchAllMembers();
+                const customerIds = [...new Set(
+                    rawMembers
+                        .map((edge) => extractNumericCustomerId(normalizeCustomerGidFromMember(edge?.node?.id)))
+                        .filter(Boolean)
+                )];
+
+                const metricsByCustomerId = await calculateWindowMetricsForCustomers({
+                    customerIds,
+                    months: spenderWindowMonths,
+                    shopUrl: url,
+                    token,
+                });
+
+                membersWithWindowSpend = rawMembers.map((edge) => {
+                    const customerId = extractNumericCustomerId(normalizeCustomerGidFromMember(edge?.node?.id));
+                    const windowMetrics = (customerId && metricsByCustomerId.get(customerId)) || getDefaultWindowMetrics();
+                    const fallbackCurrency =
+                        edge?.node?.amountSpent?.currencyCode ||
+                        windowMetrics.currencyCode ||
+                        'GBP';
+
+                    return {
+                        ...edge,
+                        node: {
+                            ...edge.node,
+                            numberOfOrders: windowMetrics.orderCount,
+                            amountSpent: {
+                                amount: windowMetrics.amount.toFixed(2),
+                                currencyCode: fallbackCurrency,
+                            },
+                        }
+                    };
+                });
+
+                membersWithWindowSpend.sort((a, b) => {
+                    const amountA = parseFloat(a?.node?.amountSpent?.amount || 0);
+                    const amountB = parseFloat(b?.node?.amountSpent?.amount || 0);
+                    return amountB - amountA;
+                });
+
+                segmentWindowMembersCache.set(cacheKey, {
+                    members: membersWithWindowSpend,
+                    expiresAt: Date.now() + SEGMENT_WINDOW_CACHE_TTL_MS,
+                });
+            }
+
+            const filteredMembers = normalizedSearch
+                ? membersWithWindowSpend.filter(matchesSearch)
+                : membersWithWindowSpend;
+
+            filteredMembers.sort((a, b) => {
+                const amountA = parseFloat(a?.node?.amountSpent?.amount || 0);
+                const amountB = parseFloat(b?.node?.amountSpent?.amount || 0);
+                return amountB - amountA;
+            });
+
+            const filteredEdgeCount = filteredMembers.length;
+            let startIndex = 0;
+            let endIndex = Math.min(pageSize, filteredEdgeCount);
+
+            if (requestedDirection === 'next' && after) {
+                const afterIndex = filteredMembers.findIndex((edge) => edge?.cursor === after);
+                if (afterIndex >= 0) {
+                    startIndex = afterIndex + 1;
+                    endIndex = Math.min(startIndex + pageSize, filteredEdgeCount);
+                }
+            } else if (requestedDirection === 'prev' && before) {
+                const beforeIndex = filteredMembers.findIndex((edge) => edge?.cursor === before);
+                if (beforeIndex >= 0) {
+                    endIndex = beforeIndex;
+                    startIndex = Math.max(0, endIndex - pageSize);
+                }
+            }
+
+            const pageSlice = filteredMembers.slice(startIndex, endIndex);
+
+            const customerIds = [...new Set(
+                pageSlice
+                    .map((edge) => normalizeCustomerGidFromMember(edge?.node?.id))
+                    .filter(Boolean)
+            )];
+
+            const createdAtByCustomerId = new Map();
+
+            for (let i = 0; i < customerIds.length; i += 250) {
+                const chunk = customerIds.slice(i, i + 250);
+
+                const customerNodesQuery = {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Customer {
+                                id
+                                createdAt
+                            }
+                        }
+                    }`
+                };
+
+                const customerNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, customerNodesQuery, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const nodes = customerNodesResponse.data?.data?.nodes || [];
+                nodes.forEach((node) => {
+                    if (node?.id && node?.createdAt) {
+                        createdAtByCustomerId.set(node.id, node.createdAt);
+                    }
+                });
+            }
+
+            const membersWithCreatedAt = pageSlice.map((edge) => {
+                const customerId = normalizeCustomerGidFromMember(edge?.node?.id);
+                return {
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        createdAt: customerId ? (createdAtByCustomerId.get(customerId) || null) : null,
+                    }
+                };
+            });
+
+            const orderIds = [...new Set(
+                membersWithCreatedAt
+                    .map((edge) => edge?.node?.lastOrderId)
+                    .filter(Boolean)
+            )];
+
+            const orderDetailsById = new Map();
+
+            for (let i = 0; i < orderIds.length; i += 250) {
+                const chunk = orderIds.slice(i, i + 250);
+
+                const orderNodesQuery = {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Order {
+                                id
+                                createdAt
+                                lineItems(first: 50) {
+                                    edges {
+                                        node {
+                                            name
+                                            title
+                                            variantTitle
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }`
+                };
+
+                const orderNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, orderNodesQuery, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const orderNodes = orderNodesResponse.data?.data?.nodes || [];
+                orderNodes.forEach((orderNode) => {
+                    if (!orderNode?.id) return;
+
+                    const lineItemNames = (orderNode?.lineItems?.edges || [])
+                        .map((lineEdge) => {
+                            const item = lineEdge?.node;
+                            if (!item) return null;
+                            if (item?.name) return item.name;
+                            if (item?.title) {
+                                return `${item.title}${item?.variantTitle ? ` / ${item.variantTitle}` : ''}`;
+                            }
+                            return null;
+                        })
+                        .filter(Boolean);
+
+                    const uniqueLineItemNames = [...new Set(lineItemNames)];
+                    const purchasedWhat = uniqueLineItemNames.length ? uniqueLineItemNames.join(', ') : null;
+
+                    orderDetailsById.set(orderNode.id, {
+                        createdAt: orderNode?.createdAt || null,
+                        purchasedWhat: purchasedWhat || null,
+                    });
+                });
+            }
+
+            const membersEnriched = membersWithCreatedAt.map((edge) => {
+                const orderId = edge?.node?.lastOrderId;
+                const orderDetails = orderId ? orderDetailsById.get(orderId) : null;
+
+                return {
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        lastPurchasedAt: orderDetails?.createdAt || null,
+                        purchasedWhat: orderDetails?.purchasedWhat || null,
+                    }
+                };
+            });
+
+            const pageInfo = {
+                hasPreviousPage: startIndex > 0,
+                hasNextPage: endIndex < filteredEdgeCount,
+                startCursor: pageSlice[0]?.cursor || null,
+                endCursor: pageSlice[pageSlice.length - 1]?.cursor || null,
+            };
+
+            return successResponse(res, { members: membersEnriched, pageInfo, totalCount: filteredEdgeCount });
+        }
 
         const response = normalizedSearch
             ? { data: { data: { customerSegmentMembers: { edges: await fetchAllMembers() } } } }
