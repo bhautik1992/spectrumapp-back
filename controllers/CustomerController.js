@@ -15,6 +15,8 @@ const BIG_SPENDER_SEGMENT_MONTHS = {
     'gid://shopify/Segment/1145045746046': 12,
 };
 
+const ABANDONED_CHECKOUT_SEGMENT_ID = 'gid://shopify/Segment/363996381437';
+
 const parseLinkHeaderNextPageInfo = (linkHeader) => {
     if (!linkHeader) return null;
     const nextMatch = linkHeader.match(/<[^>]+[?&]page_info=([^&>]+)[^>]*>;\s*rel="next"/i);
@@ -97,6 +99,72 @@ const calculateWindowMetricsForCustomers = async ({ customerIds, months, shopUrl
     }
 
     return metricsByCustomerId;
+};
+
+const fetchAbandonedCheckoutDetailsForEmails = async ({ emails, shopUrl, token }) => {
+    const targetEmails = [...new Set((emails || []).map((email) => String(email || '').trim().toLowerCase()).filter(Boolean))];
+    const abandonedCheckoutDetailsByEmail = new Map();
+
+    if (!targetEmails.length) {
+        return abandonedCheckoutDetailsByEmail;
+    }
+
+    const chunkSize = 20;
+
+    for (let i = 0; i < targetEmails.length; i += chunkSize) {
+        const chunk = targetEmails.slice(i, i + chunkSize);
+        const searchQuery = chunk.map((email) => `"${email.replace(/"/g, '\\"')}"`).join(' OR ');
+        const graphqlQuery = `query {
+            abandonedCheckouts(first: 250, query: "${searchQuery.replace(/"/g, '\\"')}", sortKey: CREATED_AT, reverse: true) {
+                nodes {
+                    createdAt
+                    lineItems(first: 50) {
+                        edges {
+                            node {
+                                title
+                                variantTitle
+                            }
+                        }
+                    }
+                    customer {
+                        email
+                    }
+                }
+            }
+        }`;
+
+        const response = await axios.post(
+            `${shopUrl}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+            { query: graphqlQuery },
+            {
+                headers: {
+                    'X-Shopify-Access-Token': token,
+                    'Content-Type': 'application/json',
+                }
+            }
+        );
+
+        const abandonedCheckouts = response.data?.data?.abandonedCheckouts?.nodes || [];
+        abandonedCheckouts.forEach((checkout) => {
+            const email = String(checkout?.customer?.email || '').trim().toLowerCase();
+            if (!email || abandonedCheckoutDetailsByEmail.has(email)) return;
+
+            const lineItemNames = (checkout?.lineItems?.edges || [])
+                .map((lineEdge) => {
+                    const item = lineEdge?.node;
+                    if (!item?.title) return null;
+                    return item?.variantTitle ? `${item.title} / ${item.variantTitle}` : item.title;
+                })
+                .filter(Boolean);
+
+            abandonedCheckoutDetailsByEmail.set(email, {
+                abandoned_checkout_date: checkout?.createdAt || null,
+                abandoned_checkout_products: lineItemNames.length ? [...new Set(lineItemNames)].join(', ') : null,
+            });
+        });
+    }
+
+    return abandonedCheckoutDetailsByEmail;
 };
 
 export const edit = async (req, res) => {
@@ -1284,6 +1352,33 @@ export const segmentRecords = async (req, res) => {
             };
         });
 
+        let membersWithAbandonedCheckoutDate = membersEnriched;
+        if (id === ABANDONED_CHECKOUT_SEGMENT_ID) {
+            const emails = membersEnriched
+                .map((edge) => edge?.node?.defaultEmailAddress?.emailAddress)
+                .filter(Boolean);
+
+            const abandonedCheckoutDetailsByEmail = await fetchAbandonedCheckoutDetailsForEmails({
+                emails,
+                shopUrl: url,
+                token,
+            });
+
+            membersWithAbandonedCheckoutDate = membersEnriched.map((edge) => {
+                const email = String(edge?.node?.defaultEmailAddress?.emailAddress || '').trim().toLowerCase();
+                const abandonedCheckoutDetails = abandonedCheckoutDetailsByEmail.get(email) || {};
+
+                return {
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        abandoned_checkout_date: abandonedCheckoutDetails.abandoned_checkout_date || null,
+                        abandoned_checkout_products: abandonedCheckoutDetails.abandoned_checkout_products || null,
+                    }
+                };
+            });
+        }
+
         let pageInfo = response.data?.data?.customerSegmentMembers?.pageInfo || {};
         let totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
 
@@ -1319,13 +1414,12 @@ export const segmentRecords = async (req, res) => {
             return successResponse(res, {members: pageSlice, pageInfo, totalCount});
         }
 
-        return successResponse(res, {members: membersEnriched, pageInfo, totalCount});
+        return successResponse(res, {members: membersWithAbandonedCheckoutDate, pageInfo, totalCount});
     } catch (error) {
         // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
 };
-
 // First Call: GET /api/customer/list?batchSize=250
 // Second Call: GET /api/customer/list?batchSize=250&pageInfo=<value from previous response>
 // Repeat until response returns "nextPageInfo": null.
@@ -1334,7 +1428,6 @@ export const listCustomers1 = async (req, res) => {
     try {
         const batchSize = parseInt(req.query.batchSize) || 250;
         const pageInfo = req.query.pageInfo || null;
-
         if (batchSize < 1 || batchSize > 250) {
             return errorResponse(res, "Batch size must be between 1 and 250", 400);
         }
