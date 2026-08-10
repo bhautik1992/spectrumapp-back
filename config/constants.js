@@ -27,5 +27,6 @@ export const BIG_SPENDER_SEGMENT_IDS = [
 ];
 
 export const ABANDONED_CHECKOUT_SEGMENT_ID = 'gid://shopify/Segment/363996381437';
+export const ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID = 'gid://shopify/Segment/453231706365';
 
 

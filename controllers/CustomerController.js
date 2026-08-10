@@ -3,7 +3,7 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
@@ -57,6 +57,54 @@ const getDefaultWindowMetrics = () => ({
     currencyCode: null,
     orderCount: 0,
 });
+
+const getDefaultActiveTradeAccountsDateRange = () => {
+    const today = new Date();
+    const lastMonth = new Date();
+    lastMonth.setMonth(today.getMonth() - 1);
+
+    return {
+        fromDate: formatDateOnlyString(lastMonth),
+        toDate: formatDateOnlyString(today),
+    };
+};
+
+const formatDateOnlyString = (value) => {
+    if (!value) return null;
+
+    if (typeof value === 'string') {
+        const trimmed = String(value).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+        const date = new Date(trimmed);
+        if (Number.isNaN(date.getTime())) return null;
+
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+
+        return `${year}-${month}-${day}`;
+    }
+
+    if (value instanceof Date) {
+        const year = value.getUTCFullYear();
+        const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(value.getUTCDate()).padStart(2, '0');
+
+        return `${year}-${month}-${day}`;
+    }
+
+    return null;
+};
+
+const toDateOnlyString = (value) => formatDateOnlyString(value);
+
+const isWithinInclusiveDateRange = (value, fromDate, toDate) => {
+    const dateValue = toDateOnlyString(value);
+    if (!dateValue) return false;
+
+    return dateValue >= fromDate && dateValue <= toDate;
+};
 
 const calculateWindowMetricsForCustomers = async ({ customerIds, months, shopUrl, token }) => {
     const targetCustomerIds = new Set((customerIds || []).map((id) => String(id)).filter(Boolean));
@@ -851,7 +899,7 @@ export const segmentList = async (req, res) => {
 
 export const segmentRecords = async (req, res) => {
     try {
-        const { id, perPage, before, after, isNext, search = '' } = req.query;
+        const { id, perPage, before, after, isNext, search = '', fromDate = '', toDate = '' } = req.query;
         const spenderWindowMonths = BIG_SPENDER_SEGMENT_MONTHS[id] || null;
         const sortClause = spenderWindowMonths
             ? `sortKey: "amount_spent", reverse: true`
@@ -970,6 +1018,176 @@ export const segmentRecords = async (req, res) => {
 
             return allMembers;
         };
+
+        if (id === ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID) {
+            const resolvedDateRange = {
+                ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
+            };
+
+            const rawMembers = await fetchAllMembers();
+            const members = normalizedSearch
+                ? rawMembers.filter(matchesSearch)
+                : rawMembers;
+
+            const customerIds = [...new Set(
+                members
+                    .map((edge) => normalizeCustomerGidFromMember(edge?.node?.id))
+                    .filter(Boolean)
+            )];
+
+            const createdAtByCustomerId = new Map();
+
+            for (let i = 0; i < customerIds.length; i += 250) {
+                const chunk = customerIds.slice(i, i + 250);
+
+                const customerNodesQuery = {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Customer {
+                                id
+                                createdAt
+                            }
+                        }
+                    }`
+                };
+
+                const customerNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, customerNodesQuery, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const nodes = customerNodesResponse.data?.data?.nodes || [];
+                nodes.forEach((node) => {
+                    if (node?.id && node?.createdAt) {
+                        createdAtByCustomerId.set(node.id, node.createdAt);
+                    }
+                });
+            }
+
+            const membersWithCreatedAt = members.map((edge) => {
+                const customerId = normalizeCustomerGidFromMember(edge?.node?.id);
+                return {
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        createdAt: customerId ? (createdAtByCustomerId.get(customerId) || null) : null,
+                    }
+                };
+            });
+
+            const orderIds = [...new Set(
+                membersWithCreatedAt
+                    .map((edge) => edge?.node?.lastOrderId)
+                    .filter(Boolean)
+            )];
+
+            const orderDetailsById = new Map();
+
+            for (let i = 0; i < orderIds.length; i += 250) {
+                const chunk = orderIds.slice(i, i + 250);
+
+                const orderNodesQuery = {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Order {
+                                id
+                                createdAt
+                                lineItems(first: 50) {
+                                    edges {
+                                        node {
+                                            name
+                                            title
+                                            variantTitle
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }`
+                };
+
+                const orderNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, orderNodesQuery, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const orderNodes = orderNodesResponse.data?.data?.nodes || [];
+                orderNodes.forEach((orderNode) => {
+                    if (!orderNode?.id) return;
+
+                    const lineItemNames = (orderNode?.lineItems?.edges || [])
+                        .map((lineEdge) => {
+                            const item = lineEdge?.node;
+                            if (!item) return null;
+                            if (item?.name) return item.name;
+                            if (item?.title) {
+                                return `${item.title}${item?.variantTitle ? ` / ${item.variantTitle}` : ''}`;
+                            }
+                            return null;
+                        })
+                        .filter(Boolean);
+
+                    const uniqueLineItemNames = [...new Set(lineItemNames)];
+                    const purchasedWhat = uniqueLineItemNames.length ? uniqueLineItemNames.join(', ') : null;
+
+                    orderDetailsById.set(orderNode.id, {
+                        createdAt: orderNode?.createdAt || null,
+                        purchasedWhat: purchasedWhat || null,
+                    });
+                });
+            }
+
+            const membersEnriched = membersWithCreatedAt.map((edge) => {
+                const orderId = edge?.node?.lastOrderId;
+                const orderDetails = orderId ? orderDetailsById.get(orderId) : null;
+
+                return {
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        lastPurchasedAt: orderDetails?.createdAt || null,
+                        purchasedWhat: orderDetails?.purchasedWhat || null,
+                    }
+                };
+            });
+
+            const dateFilteredMembers = membersEnriched.filter((edge) =>
+                isWithinInclusiveDateRange(edge?.node?.createdAt, resolvedDateRange.fromDate, resolvedDateRange.toDate)
+            );
+
+            const filteredEdgeCount = dateFilteredMembers.length;
+            let startIndex = 0;
+            let endIndex = Math.min(pageSize, filteredEdgeCount);
+
+            if (requestedDirection === 'next' && after) {
+                const afterIndex = dateFilteredMembers.findIndex((edge) => edge?.cursor === after);
+                if (afterIndex >= 0) {
+                    startIndex = afterIndex + 1;
+                    endIndex = Math.min(startIndex + pageSize, filteredEdgeCount);
+                }
+            } else if (requestedDirection === 'prev' && before) {
+                const beforeIndex = dateFilteredMembers.findIndex((edge) => edge?.cursor === before);
+                if (beforeIndex >= 0) {
+                    endIndex = beforeIndex;
+                    startIndex = Math.max(0, endIndex - pageSize);
+                }
+            }
+
+            const pageSlice = dateFilteredMembers.slice(startIndex, endIndex);
+
+            const pageInfo = {
+                hasPreviousPage: startIndex > 0,
+                hasNextPage: endIndex < filteredEdgeCount,
+                startCursor: pageSlice[0]?.cursor || null,
+                endCursor: pageSlice[pageSlice.length - 1]?.cursor || null,
+            };
+
+            return successResponse(res, { members: pageSlice, pageInfo, totalCount: filteredEdgeCount });
+        }
 
         if (spenderWindowMonths) {
             const cacheKey = `${id}|${spenderWindowMonths}`;
@@ -1414,7 +1632,7 @@ export const segmentRecords = async (req, res) => {
 
         return successResponse(res, {members: membersWithAbandonedCheckoutDate, pageInfo, totalCount});
     } catch (error) {
-        // console.log( error.response?.data || error.message);
+        console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
 };

@@ -3,7 +3,7 @@ import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import { storeLog } from "../helpers/Common.js";
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID } from '../config/constants.js';
 
 const csvEscape = (value) => {
   if (value === null || value === undefined) return '';
@@ -85,6 +85,54 @@ const getDefaultWindowMetrics = () => ({
   currencyCode: null,
   orderCount: 0,
 });
+
+const getDefaultActiveTradeAccountsDateRange = () => {
+  const today = new Date();
+  const lastMonth = new Date();
+  lastMonth.setMonth(today.getMonth() - 1);
+
+  return {
+    fromDate: formatDateOnlyString(lastMonth),
+    toDate: formatDateOnlyString(today),
+  };
+};
+
+const formatDateOnlyString = (value) => {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    const trimmed = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) return null;
+
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  if (value instanceof Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(value.getUTCDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
+};
+
+const toDateOnlyString = (value) => formatDateOnlyString(value);
+
+const isWithinInclusiveDateRange = (value, fromDate, toDate) => {
+  const dateValue = toDateOnlyString(value);
+  if (!dateValue) return false;
+
+  return dateValue >= fromDate && dateValue <= toDate;
+};
 
 const calculateWindowMetricsForCustomers = async ({ customerIds, months, shopUrl, headers }) => {
   const targetCustomerIds = new Set((customerIds || []).map((id) => String(id)).filter(Boolean));
@@ -417,7 +465,7 @@ export const listCustomersExport = async (req, res) => {
 
 export const listSegmentMembersExport = async (req, res) => {
   try {
-    const { id, segmentName = 'segment' } = req.query;
+    const { id, segmentName = 'segment', fromDate, toDate } = req.query;
     const spenderWindowMonths = BIG_SPENDER_SEGMENT_MONTHS[id] || null;
     const sortClause = spenderWindowMonths
       ? 'sortKey: "amount_spent", reverse: true'
@@ -523,6 +571,13 @@ export const listSegmentMembersExport = async (req, res) => {
     const allMembers = await fetchAllMembers();
 
     let orderedMembers = allMembers;
+    const isActiveTradeAccountsSegment = id === ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID;
+    const resolvedDateRange = isActiveTradeAccountsSegment
+      ? {
+          ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
+        }
+      : null;
+
     if (spenderWindowMonths) {
       const customerIds = [...new Set(
         allMembers
@@ -598,6 +653,14 @@ export const listSegmentMembersExport = async (req, res) => {
         if (node?.id && node?.createdAt) {
           createdAtByCustomerId.set(node.id, node.createdAt);
         }
+      });
+    }
+
+    if (isActiveTradeAccountsSegment && resolvedDateRange) {
+      orderedMembers = orderedMembers.filter((edge) => {
+        const customerId = normalizeCustomerGid(edge?.node?.id);
+        const createdAt = customerId ? createdAtByCustomerId.get(customerId) || null : null;
+        return isWithinInclusiveDateRange(createdAt, resolvedDateRange.fromDate, resolvedDateRange.toDate);
       });
     }
 
