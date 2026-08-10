@@ -3,7 +3,7 @@ import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import { storeLog } from "../helpers/Common.js";
-import { leadStatusLabels } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS } from '../config/constants.js';
 
 const csvEscape = (value) => {
   if (value === null || value === undefined) return '';
@@ -56,9 +56,9 @@ const normalizeCustomerGid = (memberId) => {
 };
 
 const BIG_SPENDER_SEGMENT_MONTHS = {
-  'gid://shopify/Segment/1145045680510': 3,
-  'gid://shopify/Segment/1145045713278': 6,
-  'gid://shopify/Segment/1145045746046': 12,
+  [BIG_SPENDER_SEGMENT_IDS[0]]: 3,
+  [BIG_SPENDER_SEGMENT_IDS[1]]: 6,
+  [BIG_SPENDER_SEGMENT_IDS[2]]: 12,
 };
 
 const parseLinkHeaderNextUrl = (linkHeader) => {

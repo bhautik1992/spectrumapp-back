@@ -3,19 +3,17 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
 import jsforce from 'jsforce';
 
 const BIG_SPENDER_SEGMENT_MONTHS = {
-    'gid://shopify/Segment/1145045680510': 3,
-    'gid://shopify/Segment/1145045713278': 6,
-    'gid://shopify/Segment/1145045746046': 12,
+    [BIG_SPENDER_SEGMENT_IDS[0]]: 3,
+    [BIG_SPENDER_SEGMENT_IDS[1]]: 6,
+    [BIG_SPENDER_SEGMENT_IDS[2]]: 12,
 };
-
-const ABANDONED_CHECKOUT_SEGMENT_ID = 'gid://shopify/Segment/363996381437';
 
 const parseLinkHeaderNextPageInfo = (linkHeader) => {
     if (!linkHeader) return null;
