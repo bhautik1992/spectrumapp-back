@@ -3,7 +3,7 @@ import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import { storeLog } from "../helpers/Common.js";
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 
 const csvEscape = (value) => {
   if (value === null || value === undefined) return '';
@@ -37,10 +37,10 @@ const formatInsightDate = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
 
-  const day = String(date.getDate()).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = monthNames[date.getMonth()] || '';
-  const year = date.getFullYear();
+  const month = monthNames[date.getUTCMonth()] || '';
+  const year = date.getUTCFullYear();
 
   return `${day} ${month}, ${year}`;
 };
@@ -571,7 +571,12 @@ export const listSegmentMembersExport = async (req, res) => {
     const allMembers = await fetchAllMembers();
 
     let orderedMembers = allMembers;
-    const isActiveTradeAccountsSegment = id === ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID;
+    const TRADE_ACCOUNT_SEGMENTS = new Set([
+      ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID,
+      TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID,
+      TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
+    ]);
+    const isActiveTradeAccountsSegment = TRADE_ACCOUNT_SEGMENTS.has(id);
     const resolvedDateRange = isActiveTradeAccountsSegment
       ? {
           ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),

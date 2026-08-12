@@ -3,7 +3,7 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
@@ -1019,7 +1019,13 @@ export const segmentRecords = async (req, res) => {
             return allMembers;
         };
 
-        if (id === ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID) {
+        const TRADE_ACCOUNT_SEGMENTS = new Set([
+            ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID,
+            TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID,
+            TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
+        ]);
+
+        if (TRADE_ACCOUNT_SEGMENTS.has(id)) {
             const resolvedDateRange = {
                 ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
             };
@@ -1632,7 +1638,7 @@ export const segmentRecords = async (req, res) => {
 
         return successResponse(res, {members: membersWithAbandonedCheckoutDate, pageInfo, totalCount});
     } catch (error) {
-        console.log( error.response?.data || error.message);
+        // console.log( error.response?.data || error.message);
         return errorResponse(res, process.env.ERROR_MSG, 500);
     }
 };
