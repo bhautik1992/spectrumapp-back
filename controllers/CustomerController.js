@@ -1605,27 +1605,30 @@ export const segmentRecords = async (req, res) => {
         let totalCount = response.data?.data?.customerSegmentMembers?.totalCount || 0;
 
         if (normalizedSearch) {
-            const filteredEdgeCount = membersEnriched.length;
+            // Use the abandoned-checkout-enriched array when available so
+            // search results include `abandoned_checkout_date` for that segment.
+            const sourceArray = (id === ABANDONED_CHECKOUT_SEGMENT_ID) ? membersWithAbandonedCheckoutDate : membersEnriched;
+            const filteredEdgeCount = sourceArray.length;
             totalCount = filteredEdgeCount;
 
             let startIndex = 0;
             let endIndex = Math.min(pageSize, filteredEdgeCount);
 
             if (requestedDirection === 'next' && after) {
-                const afterIndex = membersEnriched.findIndex((edge) => edge?.cursor === after);
+                const afterIndex = sourceArray.findIndex((edge) => edge?.cursor === after);
                 if (afterIndex >= 0) {
                     startIndex = afterIndex + 1;
                     endIndex = Math.min(startIndex + pageSize, filteredEdgeCount);
                 }
             } else if (requestedDirection === 'prev' && before) {
-                const beforeIndex = membersEnriched.findIndex((edge) => edge?.cursor === before);
+                const beforeIndex = sourceArray.findIndex((edge) => edge?.cursor === before);
                 if (beforeIndex >= 0) {
                     endIndex = beforeIndex;
                     startIndex = Math.max(0, endIndex - pageSize);
                 }
             }
 
-            const pageSlice = membersEnriched.slice(startIndex, endIndex);
+            const pageSlice = sourceArray.slice(startIndex, endIndex);
             pageInfo = {
                 hasPreviousPage: startIndex > 0,
                 hasNextPage: endIndex < filteredEdgeCount,
