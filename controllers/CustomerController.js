@@ -13,6 +13,7 @@ const BIG_SPENDER_SEGMENT_MONTHS = {
     [BIG_SPENDER_SEGMENT_IDS[0]]: 3,
     [BIG_SPENDER_SEGMENT_IDS[1]]: 6,
     [BIG_SPENDER_SEGMENT_IDS[2]]: 12,
+    [BIG_SPENDER_SEGMENT_IDS[3]]: 12,
 };
 
 const parseLinkHeaderNextPageInfo = (linkHeader) => {
