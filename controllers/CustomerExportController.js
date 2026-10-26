@@ -3,7 +3,7 @@ import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import { storeLog } from "../helpers/Common.js";
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, MULTIPLE_PURCHASES_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 
 const csvEscape = (value) => {
   if (value === null || value === undefined) return '';
@@ -538,6 +538,7 @@ export const listSegmentMembersExport = async (req, res) => {
                     phoneNumber
                   }
                   numberOfOrders
+                  lastOrderId
                 }
               }
               pageInfo {
@@ -583,6 +584,36 @@ export const listSegmentMembersExport = async (req, res) => {
           ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
         }
       : null;
+
+    if (id === MULTIPLE_PURCHASES_SEGMENT_ID) {
+      const orderIds = [...new Set(allMembers.map((edge) => edge?.node?.lastOrderId).filter(Boolean))];
+      const lastOrderDateById = new Map();
+
+      for (let i = 0; i < orderIds.length; i += 250) {
+        const chunk = orderIds.slice(i, i + 250);
+        const orderNodesResponse = await requestWithRetry(
+          {
+            method: 'post',
+            url: `${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+            headers,
+            data: {
+              query: `query { nodes(ids: ${JSON.stringify(chunk)}) { ... on Order { id createdAt } } }`,
+            },
+          },
+          3
+        );
+
+        (orderNodesResponse?.data?.data?.nodes || []).forEach((order) => {
+          if (order?.id && order?.createdAt) lastOrderDateById.set(order.id, order.createdAt);
+        });
+      }
+
+      orderedMembers = allMembers.slice().sort((a, b) => {
+        const dateA = Date.parse(lastOrderDateById.get(a?.node?.lastOrderId) || '') || 0;
+        const dateB = Date.parse(lastOrderDateById.get(b?.node?.lastOrderId) || '') || 0;
+        return dateB - dateA;
+      });
+    }
 
     if (spenderWindowMonths) {
       const customerIds = [...new Set(

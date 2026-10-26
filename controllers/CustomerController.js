@@ -3,7 +3,7 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, MULTIPLE_PURCHASES_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
@@ -1025,6 +1025,71 @@ export const segmentRecords = async (req, res) => {
             TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID,
             TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
         ]);
+
+        if (id === MULTIPLE_PURCHASES_SEGMENT_ID) {
+            const rawMembers = await fetchAllMembers();
+            const orderIds = [...new Set(rawMembers.map((edge) => edge?.node?.lastOrderId).filter(Boolean))];
+            const lastOrderDateById = new Map();
+
+            for (let i = 0; i < orderIds.length; i += 250) {
+                const chunk = orderIds.slice(i, i + 250);
+                const orderNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, {
+                    query: `query { nodes(ids: ${JSON.stringify(chunk)}) { ... on Order { id createdAt } } }`
+                }, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                (orderNodesResponse.data?.data?.nodes || []).forEach((order) => {
+                    if (order?.id && order?.createdAt) lastOrderDateById.set(order.id, order.createdAt);
+                });
+            }
+
+            const sortedMembers = rawMembers
+                .map((edge) => ({
+                    ...edge,
+                    node: {
+                        ...edge.node,
+                        lastPurchasedAt: lastOrderDateById.get(edge?.node?.lastOrderId) || null,
+                    }
+                }))
+                .filter(matchesSearch)
+                .sort((a, b) => {
+                    const dateA = Date.parse(a?.node?.lastPurchasedAt || '') || 0;
+                    const dateB = Date.parse(b?.node?.lastPurchasedAt || '') || 0;
+                    return dateB - dateA;
+                });
+
+            const totalCount = sortedMembers.length;
+            let startIndex = 0;
+            let endIndex = Math.min(pageSize, totalCount);
+
+            if (requestedDirection === 'next' && after) {
+                const afterIndex = sortedMembers.findIndex((edge) => edge?.cursor === after);
+                if (afterIndex >= 0) {
+                    startIndex = afterIndex + 1;
+                    endIndex = Math.min(startIndex + pageSize, totalCount);
+                }
+            } else if (requestedDirection === 'prev' && before) {
+                const beforeIndex = sortedMembers.findIndex((edge) => edge?.cursor === before);
+                if (beforeIndex >= 0) {
+                    endIndex = beforeIndex;
+                    startIndex = Math.max(0, endIndex - pageSize);
+                }
+            }
+
+            const members = sortedMembers.slice(startIndex, endIndex);
+            const pageInfo = {
+                hasPreviousPage: startIndex > 0,
+                hasNextPage: endIndex < totalCount,
+                startCursor: members[0]?.cursor || null,
+                endCursor: members[members.length - 1]?.cursor || null,
+            };
+
+            return successResponse(res, { members, pageInfo, totalCount });
+        }
 
         if (TRADE_ACCOUNT_SEGMENTS.has(id)) {
             const resolvedDateRange = {
