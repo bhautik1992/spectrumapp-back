@@ -3,7 +3,7 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, MULTIPLE_PURCHASES_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
@@ -1026,7 +1026,7 @@ export const segmentRecords = async (req, res) => {
             TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
         ]);
 
-        if (id === MULTIPLE_PURCHASES_SEGMENT_ID) {
+        if ([MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID].includes(id)) {
             const rawMembers = await fetchAllMembers();
             const orderIds = [...new Set(rawMembers.map((edge) => edge?.node?.lastOrderId).filter(Boolean))];
             const lastOrderDateById = new Map();
