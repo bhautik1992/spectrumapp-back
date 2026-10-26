@@ -3,7 +3,7 @@ import Settings from "../models/Settings.js";
 import Diary from "../models/Diary.js";
 import Events from "../models/Events.js";
 import { successResponse, errorResponse } from '../helpers/ResponseHandler.js';
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, ABANDONED_CHECKOUT_SEGMENT_ID, MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID, CUSTOMERS_ADDED_TO_COMPANIES_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 import { storeLog } from "../helpers/Common.js";
 import axios from 'axios';
 import { engagementChecklist } from '../config/constants.js';
@@ -1025,6 +1025,89 @@ export const segmentRecords = async (req, res) => {
             TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID,
             TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
         ]);
+
+        if (id === CUSTOMERS_ADDED_TO_COMPANIES_SEGMENT_ID) {
+            const resolvedDateRange = {
+                ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
+            };
+            const rawMembers = (await fetchAllMembers()).filter(matchesSearch);
+            const customerIds = [...new Set(
+                rawMembers
+                    .map((edge) => normalizeCustomerGidFromMember(edge?.node?.id))
+                    .filter(Boolean)
+            )];
+            const companyAddedAtByCustomerId = new Map();
+
+            for (let i = 0; i < customerIds.length; i += 250) {
+                const chunk = customerIds.slice(i, i + 250);
+                const customerNodesResponse = await axios.post(`${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`, {
+                    query: `query {
+                        nodes(ids: ${JSON.stringify(chunk)}) {
+                            ... on Customer {
+                                id
+                                companyContactProfiles { createdAt }
+                            }
+                        }
+                    }`
+                }, {
+                    headers: {
+                        'X-Shopify-Access-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                (customerNodesResponse.data?.data?.nodes || []).forEach((customer) => {
+                    const profileDates = (customer?.companyContactProfiles || [])
+                        .map((profile) => profile?.createdAt)
+                        .filter((date) => date && !Number.isNaN(Date.parse(date)));
+                    if (customer?.id && profileDates.length) {
+                        companyAddedAtByCustomerId.set(customer.id, profileDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]);
+                    }
+                });
+            }
+
+            const filteredMembers = rawMembers
+                .map((edge) => {
+                    const customerId = normalizeCustomerGidFromMember(edge?.node?.id);
+                    return {
+                        ...edge,
+                        node: {
+                            ...edge.node,
+                            companyAddedAt: customerId ? (companyAddedAtByCustomerId.get(customerId) || null) : null,
+                        }
+                    };
+                })
+                .filter((edge) => isWithinInclusiveDateRange(edge?.node?.companyAddedAt, resolvedDateRange.fromDate, resolvedDateRange.toDate))
+                .sort((a, b) => (Date.parse(b?.node?.companyAddedAt || '') || 0) - (Date.parse(a?.node?.companyAddedAt || '') || 0));
+
+            const totalCount = filteredMembers.length;
+            let startIndex = 0;
+            let endIndex = Math.min(pageSize, totalCount);
+
+            if (requestedDirection === 'next' && after) {
+                const afterIndex = filteredMembers.findIndex((edge) => edge?.cursor === after);
+                if (afterIndex >= 0) {
+                    startIndex = afterIndex + 1;
+                    endIndex = Math.min(startIndex + pageSize, totalCount);
+                }
+            } else if (requestedDirection === 'prev' && before) {
+                const beforeIndex = filteredMembers.findIndex((edge) => edge?.cursor === before);
+                if (beforeIndex >= 0) {
+                    endIndex = beforeIndex;
+                    startIndex = Math.max(0, endIndex - pageSize);
+                }
+            }
+
+            const members = filteredMembers.slice(startIndex, endIndex);
+            const pageInfo = {
+                hasPreviousPage: startIndex > 0,
+                hasNextPage: endIndex < totalCount,
+                startCursor: members[0]?.cursor || null,
+                endCursor: members[members.length - 1]?.cursor || null,
+            };
+
+            return successResponse(res, { members, pageInfo, totalCount });
+        }
 
         if ([MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID].includes(id)) {
             const rawMembers = await fetchAllMembers();

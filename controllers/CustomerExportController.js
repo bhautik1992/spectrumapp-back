@@ -3,7 +3,7 @@ import Customers from "../models/Customers.js";
 import Settings from "../models/Settings.js";
 import { errorResponse } from '../helpers/ResponseHandler.js';
 import { storeLog } from "../helpers/Common.js";
-import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
+import { leadStatusLabels, BIG_SPENDER_SEGMENT_IDS, MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID, CUSTOMERS_ADDED_TO_COMPANIES_SEGMENT_ID, ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID, TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID, TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID } from '../config/constants.js';
 
 const csvEscape = (value) => {
   if (value === null || value === undefined) return '';
@@ -467,6 +467,7 @@ export const listCustomersExport = async (req, res) => {
 export const listSegmentMembersExport = async (req, res) => {
   try {
     const { id, segmentName = 'segment', fromDate, toDate } = req.query;
+    const isCustomersAddedToCompaniesSegment = id === CUSTOMERS_ADDED_TO_COMPANIES_SEGMENT_ID;
     const spenderWindowMonths = BIG_SPENDER_SEGMENT_MONTHS[id] || null;
     const sortClause = spenderWindowMonths
       ? 'sortKey: "amount_spent", reverse: true'
@@ -496,6 +497,7 @@ export const listSegmentMembersExport = async (req, res) => {
       'Added Date',
       'Amount Spent',
     ];
+    if (isCustomersAddedToCompaniesSegment) csvHeaders[6] = 'Company Added Date';
 
     const safeSegmentName = sanitizeFileName(segmentName);
 
@@ -579,11 +581,54 @@ export const listSegmentMembersExport = async (req, res) => {
       TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID,
     ]);
     const isActiveTradeAccountsSegment = TRADE_ACCOUNT_SEGMENTS.has(id);
-    const resolvedDateRange = isActiveTradeAccountsSegment
+    const resolvedDateRange = (isActiveTradeAccountsSegment || isCustomersAddedToCompaniesSegment)
       ? {
           ...(fromDate && toDate ? { fromDate, toDate } : getDefaultActiveTradeAccountsDateRange()),
         }
       : null;
+
+    const companyAddedAtByCustomerId = new Map();
+    if (isCustomersAddedToCompaniesSegment) {
+      const customerIdsForCompanyDates = [...new Set(allMembers.map((edge) => normalizeCustomerGid(edge?.node?.id)).filter(Boolean))];
+
+      for (let i = 0; i < customerIdsForCompanyDates.length; i += 250) {
+        const chunk = customerIdsForCompanyDates.slice(i, i + 250);
+        const customerNodesResponse = await requestWithRetry(
+          {
+            method: 'post',
+            url: `${url}${process.env.SHOPIFY_CUS_SEGMENTS_LIST}`,
+            headers,
+            data: {
+              query: `query { nodes(ids: ${JSON.stringify(chunk)}) { ... on Customer { id companyContactProfiles { createdAt } } } }`,
+            },
+          },
+          3
+        );
+
+        (customerNodesResponse?.data?.data?.nodes || []).forEach((customer) => {
+          const profileDates = (customer?.companyContactProfiles || [])
+            .map((profile) => profile?.createdAt)
+            .filter((date) => date && !Number.isNaN(Date.parse(date)));
+          if (customer?.id && profileDates.length) {
+            companyAddedAtByCustomerId.set(customer.id, profileDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]);
+          }
+        });
+      }
+
+      orderedMembers = allMembers
+        .map((edge) => {
+          const customerId = normalizeCustomerGid(edge?.node?.id);
+          return {
+            ...edge,
+            node: {
+              ...edge.node,
+              companyAddedAt: customerId ? (companyAddedAtByCustomerId.get(customerId) || null) : null,
+            },
+          };
+        })
+        .filter((edge) => isWithinInclusiveDateRange(edge?.node?.companyAddedAt, resolvedDateRange.fromDate, resolvedDateRange.toDate))
+        .sort((a, b) => (Date.parse(b?.node?.companyAddedAt || '') || 0) - (Date.parse(a?.node?.companyAddedAt || '') || 0));
+    }
 
     if ([MULTIPLE_PURCHASES_SEGMENT_ID, B2B_PURCHASED_ONCE_SEGMENT_ID].includes(id)) {
       const orderIds = [...new Set(allMembers.map((edge) => edge?.node?.lastOrderId).filter(Boolean))];
@@ -701,6 +746,14 @@ export const listSegmentMembersExport = async (req, res) => {
       });
     }
 
+    if (isCustomersAddedToCompaniesSegment && resolvedDateRange) {
+      orderedMembers = orderedMembers.filter((edge) => {
+        const customerId = normalizeCustomerGid(edge?.node?.id);
+        const companyAddedAt = customerId ? companyAddedAtByCustomerId.get(customerId) || null : null;
+        return isWithinInclusiveDateRange(companyAddedAt, resolvedDateRange.fromDate, resolvedDateRange.toDate);
+      });
+    }
+
     for (const edge of orderedMembers) {
       const node = edge?.node || {};
       const city = node?.defaultAddress?.city || '';
@@ -715,7 +768,9 @@ export const listSegmentMembersExport = async (req, res) => {
       const phoneValue = node?.defaultPhoneNumber?.phoneNumber || '';
       const phoneCsv = phoneValue ? `\t${phoneValue}` : '';
       const customerId = normalizeCustomerGid(node?.id);
-      const addedDate = customerId ? formatInsightDate(createdAtByCustomerId.get(customerId) || null) : '';
+      const addedDate = isCustomersAddedToCompaniesSegment
+        ? formatInsightDate(customerId ? companyAddedAtByCustomerId.get(customerId) || null : null)
+        : (customerId ? formatInsightDate(createdAtByCustomerId.get(customerId) || null) : '');
 
       const row = [
         node?.displayName || '',

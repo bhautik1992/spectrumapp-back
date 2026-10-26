@@ -30,6 +30,7 @@ export const BIG_SPENDER_SEGMENT_IDS = [
 export const ABANDONED_CHECKOUT_SEGMENT_ID = 'gid://shopify/Segment/363996381437';
 export const MULTIPLE_PURCHASES_SEGMENT_ID = 'gid://shopify/Segment/363996512509';
 export const B2B_PURCHASED_ONCE_SEGMENT_ID = 'gid://shopify/Segment/1162348102014';
+export const CUSTOMERS_ADDED_TO_COMPANIES_SEGMENT_ID = 'gid://shopify/Segment/505027592445';
 export const ACTIVE_TRADE_ACCOUNTS_SEGMENT_ID = 'gid://shopify/Segment/453231706365';
 export const TRADE_ACCOUNT_NEVER_ORDERED_SEGMENT_ID = 'gid://shopify/Segment/1145043976574';
 export const TRADE_ACCOUNT_ONCE_ORDERED_SEGMENT_ID = 'gid://shopify/Segment/1145044074878';
