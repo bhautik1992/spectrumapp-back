@@ -6,10 +6,14 @@ import { storeLog } from '../helpers/Common.js';
 
 export const index = async (req, res) => {
     try {
-        const { page = 1, perPage = 10, search = "" } = req.query;
-        const pageNumber    = parseInt(page, 10);
-        const perPageNumber = parseInt(perPage, 10);
-        const regex = new RegExp(search.trim(), "i");
+        const { page = 1, perPage = 10 } = req.query;
+        const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+        const perPageNumber = Math.min(100, Math.max(1, parseInt(perPage, 10) || 10));
+        // Treat user input literally so punctuation in names, emails, or phone numbers
+        // cannot become executable regular-expression syntax.
+        const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escapedSearch, 'i');
 
         const leadStatusMap = {
             1: "Open - Not Contacted",
@@ -28,7 +32,7 @@ export const index = async (req, res) => {
 
         const matchConditions = [];
 
-        if (search.trim() !== "") {
+        if (search !== "") {
             const matchingLeadStatus = Object.entries(leadStatusMap)
                 .filter(([_, label]) => label.toLowerCase().includes(search.toLowerCase()))
                 .map(([value]) => parseInt(value));
